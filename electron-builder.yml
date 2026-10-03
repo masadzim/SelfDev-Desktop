@@ -1,0 +1,83 @@
+appId: id.my.adzim.selfdev
+productName: SelfDev
+copyright: Copyright © 2026 adzim.my.id
+
+directories:
+  output: release
+  buildResources: assets
+
+# Only the built app ships: source, tests and dev scripts stay out of the bundle.
+files:
+  - dist/**/*
+  - assets/icon.png
+  - package.json
+  - '!**/*.map'
+  - '!dist/main/tests.js'
+
+extraMetadata:
+  main: dist/main/main.js
+
+asar: true
+asarUnpack:
+  - '**/*.node'
+
+npmRebuild: false
+
+# electron-updater reads this to build the update feed URL. Publishing is
+# explicit (`--publish always` / `npm run release`); a plain `package` build
+# never contacts GitHub.
+publish:
+  provider: github
+  owner: masadzim
+  repo: SelfDev-Desktop
+  releaseType: release
+
+linux:
+  category: Development
+  synopsis: SelfDev · AI Developer Console
+  description: >-
+    Asisten coding opencode-style dengan tools lokal (baca/tulis/edit/grep/glob/run)
+    dan BYOK (Anthropic, OpenAI, OpenRouter, Groq, custom).
+  icon: assets/icon.png
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  syncDesktopName: true
+  desktop:
+    entry:
+      Name: SelfDev — AI Developer Console
+      Comment: Asisten coding AI dengan tools lokal
+      Categories: Development;IDE;
+      StartupWMClass: SelfDev
+
+deb:
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libsecret-1-0
+
+win:
+  icon: assets/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-win-x64.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SelfDev
+  deleteAppDataOnUninstall: false

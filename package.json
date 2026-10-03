@@ -1,0 +1,42 @@
+{
+  "name": "selfdev-desktop",
+  "productName": "SelfDev",
+  "version": "1.1.0",
+  "description": "SelfDev · AI Developer Console — native desktop app (BYOK)",
+  "author": {
+    "name": "adzim.my.id",
+    "email": "adzim.my.id"
+  },
+  "homepage": "https://adzim.my.id/ai",
+  "desktopName": "SelfDev",
+  "license": "MIT",
+  "private": true,
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "smoke": "node scripts/smoke.mjs",
+    "test": "SELFDEV_BUILD_TESTS=1 node scripts/build.mjs >/dev/null && node dist/main/tests.js",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && SELFDEV_DEV=1 electron .",
+    "package": "npm run build && electron-builder --linux --publish never",
+    "package:dir": "npm run build && electron-builder --linux dir --publish never",
+    "release": "npm run build && electron-builder --linux deb --win nsis --publish always",
+    "smoke:e2e": "SELFDEV_MOCK=1 node scripts/smoke.mjs",
+    "smoke:e2e:anthropic": "SELFDEV_MOCK=1 SELFDEV_MOCK_FORMAT=anthropic node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.7.2"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "esbuild@0.24.2": true
+  }
+}

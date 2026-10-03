@@ -1,0 +1,10 @@
+# build output
+dist/
+release/
+
+# deps
+node_modules/
+
+# misc
+*.log
+.DS_Store

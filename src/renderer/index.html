@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'"
+  />
+  <title>SelfDev · AI Developer Console</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ============================================================ icon sprite
+     Inline SVG so the app works fully offline (no CDN / webfont dependency). -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <defs>
+    <g id="ic-base" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></g>
+  </defs>
+  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="8" cy="12" r="4"/><path d="M12 12h9"/><path d="M17 12v3.5"/><path d="M20 12v2.5"/>
+  </symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/>
+  </symbol>
+  <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5v-13Z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5v-13Z"/>
+  </symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 20s-7-4.3-7-9a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 4.7-7 9-7 9Z"/>
+  </symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 3.5 19 6v5.5c0 4-2.9 7.5-7 9-4.1-1.5-7-5-7-9V6l7-2.5Z"/><path d="m9.2 12 2 2 3.6-3.8"/>
+  </symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14.5 5.5a4 4 0 0 0 5.2 5.2l-8.6 8.6a2.1 2.1 0 1 1-3-3l8.6-8.6a4 4 0 0 0-2.2-2.2Z"/><path d="M9.4 14.6 6.8 17.2"/>
+  </symbol>
+  <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>
+  </symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 5v14M5 12h14"/>
+  </symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 7h9M17 7h3M4 17h3M11 17h9"/>
+    <circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/>
+  </symbol>
+  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20.5 3.5 3.8 10.2a.6.6 0 0 0 0 1.1l6.6 2.6 2.6 6.6a.6.6 0 0 0 1.1 0L20.5 3.5Z"/><path d="m10.4 13.9 4.3-4.3"/>
+  </symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+    <rect x="6" y="6" width="12" height="12" rx="2.5"/>
+  </symbol>
+  <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <path d="m6 6 12 12M18 6 6 18"/>
+  </symbol>
+  <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 3.5H7.5A1.5 1.5 0 0 0 6 5v14a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 18 19V7.5L14 3.5Z"/><path d="M13.8 3.6V7.6H18"/><path d="M9 12h6M9 16h4"/>
+  </symbol>
+  <symbol id="i-file-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 3.5H7.5A1.5 1.5 0 0 0 6 5v14a1.5 1.5 0 0 0 1.5 1.5h6"/><path d="M13.8 3.6V7.6H18"/><path d="m14.5 17.5 5.2-5.2 2.3 2.3-5.2 5.2-3 .7.7-3Z"/>
+  </symbol>
+  <symbol id="i-edit-square" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17 20.5H6.5A1.5 1.5 0 0 1 5 19V8.5"/><path d="M8.5 4H19a1.5 1.5 0 0 1 1.5 1.5V16"/><path d="m12 15.5 5.2-5.2 2.3 2.3-5.2 5.2-3 .7.7-3Z"/>
+  </symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l1.8 2.2H19a1.5 1.5 0 0 1 1.5 1.5v8.8A1.5 1.5 0 0 1 19 20H5a1.5 1.5 0 0 1-1.5-1.5v-11Z"/>
+  </symbol>
+  <symbol id="i-folder-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3.5 17.5V7.5A1.5 1.5 0 0 1 5 6h4.2l1.8 2.2H19a1.5 1.5 0 0 1 1.5 1.5v1.3"/>
+    <path d="M3.5 17.5 6 10.8h15l-2.5 6.7a1 1 0 0 1-.9.6H4.6a1.1 1.1 0 0 1-1.1-1.1v.5Z"/>
+  </symbol>
+  <symbol id="i-folder-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3.5 17.5V7.5A1.5 1.5 0 0 1 5 6h4.2l1.8 2.2H17a1.5 1.5 0 0 1 1.5 1.5v1.8"/><path d="M3.5 17.5 6 10.8h11.6l-1.9 5.4"/>
+    <path d="M19.5 15v6M16.5 18h6"/>
+  </symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>
+  </symbol>
+  <symbol id="i-graph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/>
+    <path d="M8.5 6h7M7.2 8.2l3.6 7.6M16.8 8.2l-3.6 7.6"/>
+  </symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="m7.5 10 2.5 2-2.5 2M13 14.5h4"/>
+  </symbol>
+  <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 0 0-5.7-5.7l-1.3 1.3"/>
+    <path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.6 2.6a4 4 0 0 0 5.7 5.7l1.3-1.3"/>
+  </symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m6 9.5 6 6 6-6"/>
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m5 12.5 4.5 4.5L19 7"/>
+  </symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m7 7 10 10M17 7 7 17"/>
+  </symbol>
+  <symbol id="i-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+    <path d="M12 3.5a8.5 8.5 0 1 1-8.5 8.5" opacity="0.9"/>
+  </symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4.5 7h15M9.5 7V5.2A1.2 1.2 0 0 1 10.7 4h2.6a1.2 1.2 0 0 1 1.2 1.2V7"/>
+    <path d="M6.5 7l.9 12.1A1.5 1.5 0 0 0 8.9 20.5h6.2a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/><path d="M10.5 11v5.5M13.5 11v5.5"/>
+  </symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m14.5 5.5 4 4L8 20l-4.5.8L4.3 16 14.5 5.5Z"/><path d="m13 7 4 4"/>
+  </symbol>
+  <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="8" r="3.8"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/>
+  </symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="4.2"/><path d="M12 2.8v2.4M12 18.8v2.4M4.5 4.5l1.7 1.7M17.8 17.8l1.7 1.7M2.8 12h2.4M18.8 12h2.4M4.5 19.5l1.7-1.7M17.8 6.2l1.7-1.7"/>
+  </symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.5 8.5 0 1 0 20 14.2Z"/>
+  </symbol>
+  <symbol id="i-broom" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14.5 3.5 9 9M4 20l3.2-6.6L15 5.6l3.4 3.4-7.8 7.8L4 20Z"/><path d="M11.5 11.5 6 17"/>
+  </symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 6.5A1.5 1.5 0 0 0 13.5 5h-7A1.5 1.5 0 0 0 5 6.5v7A1.5 1.5 0 0 0 6.5 15"/>
+  </symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.2v.01"/>
+  </symbol>
+  <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 4v10"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/>
+  </symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19 12a7 7 0 1 1-2.05-4.95"/><path d="M19 4v4h-4"/>
+  </symbol>
+  <symbol id="i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 4v8"/><path d="M7.5 6.5a7 7 0 1 0 9 0"/>
+  </symbol>
+</svg>
+
+<div class="sd-window">
+
+  <!-- ========================================================= update banner -->
+  <div id="sdUpdate" class="sd-update" role="status" aria-live="polite" hidden>
+    <svg class="ic ic-sm"><use href="#i-download" /></svg>
+    <span id="sdUpdateText" class="sd-update-text"></span>
+    <span id="sdUpdateBar" class="sd-update-bar"><i></i></span>
+    <button id="sdUpdateAction" class="sd-update-btn" type="button"></button>
+    <button id="sdUpdateDismiss" class="sd-update-dismiss" type="button" aria-label="Nanti">&times;</button>
+  </div>
+
+  <!-- ============================================================== appbar -->
+  <header class="sd-appbar">
+    <div class="sd-appbar-brand">
+      <span class="sd-appbar-badge">◆</span>
+      <span class="sd-appbar-name">SelfDev<span class="sd-appbar-sub"> · Desktop</span></span>
+    </div>
+    <span class="sd-appbar-chip sd-chip-ok"><svg class="ic ic-sm"><use href="#i-key" /></svg> BYOK</span>
+
+    <button id="sdWorkspaceBtn" class="sd-appbar-chip sd-chip-btn" type="button" title="Pilih folder workspace untuk tools">
+      <svg class="ic ic-sm"><use href="#i-folder-plus" /></svg>
+      <span id="sdWorkspaceLabel">Pilih workspace…</span>
+    </button>
+
+    <span class="sd-appbar-spacer"></span>
+
+    <a href="#" class="sd-appbar-link" data-ext="https://adzim.my.id/selfdev/docs" title="Dokumentasi SelfDev">
+      <svg class="ic ic-sm"><use href="#i-book" /></svg> Dokumentasi
+    </a>
+    <a href="#" class="sd-appbar-link" data-ext="https://adzim.my.id/ai" title="Versi web SelfDev">
+      <svg class="ic ic-sm"><use href="#i-globe" /></svg> Web
+    </a>
+    <a href="#" class="sd-appbar-link" data-ext="https://adzim.my.id/support" title="Dukung">
+      <svg class="ic ic-sm"><use href="#i-heart" /></svg> Dukung
+    </a>
+    <a href="#" class="sd-appbar-link" data-ext="https://adzim.my.id/privacy" title="Privasi">
+      <svg class="ic ic-sm"><use href="#i-shield" /></svg> Privasi
+    </a>
+    <button id="sdThemeBtn" class="sd-btn-icon" type="button" title="Ganti tema (Ctrl+Shift+D)"></button>
+  </header>
+
+  <!-- ======================================================= selfdev console -->
+  <div id="selfdev-app" class="selfdev-app" role="application" aria-label="SelfDev AI Developer Console">
+
+    <header class="sd-header">
+      <div class="sd-brand">
+        <span class="sd-brand-badge">◆</span>
+        <span>SelfDev<span class="sd-brand-sub"> · AI Developer Console</span></span>
+      </div>
+      <div class="sd-header-tools">
+        <span id="sdStatus" class="sd-status">idle</span>
+        <button id="sdModeToggle" class="sd-mode-toggle" type="button" title="Ganti mode (Dev = tools aktif, Plan = tanya-jawab)">Dev</button>
+        <button id="sdSideToggle" class="sd-btn-icon" type="button" title="Tampilkan / sembunyikan sesi"><svg class="ic"><use href="#i-list" /></svg></button>
+        <button id="sdClearSessions" class="sd-btn-icon" type="button" title="Hapus semua sesi"><svg class="ic"><use href="#i-broom" /></svg></button>
+        <button id="sdNewSession" class="sd-btn-icon" type="button" title="Sesi baru (Ctrl+N)"><svg class="ic"><use href="#i-plus" /></svg></button>
+        <button id="sdSettingsBtn" class="sd-btn-icon" type="button" title="Pengaturan model & API (Ctrl+,)"><svg class="ic"><use href="#i-sliders" /></svg></button>
+      </div>
+    </header>
+
+    <div class="sd-layout">
+      <aside id="sdSidebar" class="sd-sidebar" aria-label="Sessions">
+        <div class="sd-sidebar-head">
+          <span class="sd-sidebar-title">Sessions</span>
+          <span id="sdSessionCount" class="sd-sidebar-count">0</span>
+        </div>
+        <div id="sdSessionList"></div>
+      </aside>
+
+      <main class="sd-main">
+        <div id="sdMessages" class="sd-messages" aria-live="polite"></div>
+
+        <div id="sdComposer" class="sd-composer">
+          <div id="sdToolsBar" class="sd-toolsbar"></div>
+          <div class="sd-input-row">
+            <div id="sdToolPop" class="sd-toolpop" role="listbox"></div>
+            <textarea
+              id="sdInput"
+              rows="1"
+              placeholder="Tanya apa saja, atau ketik @ untuk memakai tools… (Enter kirim, Shift+Enter baris baru)"
+              aria-label="Pesan"
+              spellcheck="false"
+            ></textarea>
+            <button id="sdStop" class="sd-btn-stop" type="button" title="Hentikan"><svg class="ic"><use href="#i-stop" /></svg></button>
+            <button id="sdSend" class="sd-btn-send" type="button" title="Kirim"><svg class="ic"><use href="#i-send" /></svg></button>
+          </div>
+          <div id="sdHint" class="sd-hint">
+            <b>Enter</b> kirim · <b>Shift+Enter</b> baris baru · <b>@</b> sisipkan tool · model: <b id="sdModelLabel">—</b>
+            <span id="sdWsHint"></span>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <footer class="sd-footer">
+    <span>© 2026 adzim.my.id · SelfDev Desktop · <svg class="ic ic-xs"><use href="#i-key" /></svg> BYOK — API key hanya disimpan di perangkat ini</span>
+    <span class="sd-footer-links">
+      <a href="#" data-ext="https://adzim.my.id/ai">adzim.my.id/ai</a> ·
+      <a href="#" data-ext="https://adzim.my.id/support">DUKUNGAN</a> ·
+      <a href="#" data-ext="https://adzim.my.id/privacy">PRIVASI</a>
+    </span>
+  </footer>
+</div>
+
+<!-- ========================================================= settings modal -->
+<div id="sdSettings" class="sd-modal" role="dialog" aria-modal="true" aria-labelledby="sdSettingsTitle">
+  <div class="sd-modal-card">
+    <div class="sd-modal-head">
+      <h3><svg class="ic"><use href="#i-sliders" /></svg> <span id="sdSettingsTitle">Pengaturan Model</span></h3>
+      <button id="sdSettingsClose" class="sd-modal-close" type="button" aria-label="Tutup"><svg class="ic"><use href="#i-close" /></svg></button>
+    </div>
+
+    <div class="sd-field">
+      <label for="sdProvider">Provider</label>
+      <select id="sdProvider">
+        <option value="anthropic">Anthropic</option>
+        <option value="openai">OpenAI</option>
+        <option value="openrouter">OpenRouter</option>
+        <option value="groq">Groq</option>
+        <option value="custom">Custom (OpenAI-compatible)</option>
+      </select>
+    </div>
+    <div class="sd-field">
+      <label for="sdBaseUrl">Base URL API</label>
+      <input id="sdBaseUrl" type="url" placeholder="https://api.anthropic.com" spellcheck="false" />
+    </div>
+    <div class="sd-field">
+      <label for="sdApiKey">API Key</label>
+      <input id="sdApiKey" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false" />
+      <small class="sd-field-note">Disimpan lokal di <code>state.json</code> pada folder data aplikasi. Tidak pernah dikirim ke server kami.</small>
+    </div>
+    <div class="sd-field">
+      <label for="sdModel">Model</label>
+      <input id="sdModel" type="text" list="sdModelList" placeholder="claude-sonnet-4-5" spellcheck="false" />
+      <datalist id="sdModelList"></datalist>
+    </div>
+    <div class="sd-field-row">
+      <div class="sd-field">
+        <label for="sdMaxTokens">Max Tokens</label>
+        <input id="sdMaxTokens" type="number" min="128" step="128" value="4096" />
+      </div>
+      <div class="sd-field">
+        <label for="sdTemp">Temperature</label>
+        <input id="sdTemp" type="number" min="0" max="2" step="0.1" value="0.6" />
+      </div>
+    </div>
+    <div class="sd-field">
+      <label for="sdSystem">System Prompt</label>
+      <textarea id="sdSystem" rows="4" spellcheck="false"></textarea>
+    </div>
+    <div id="sdTestResult" class="sd-test-result"></div>
+    <div class="sd-field sd-update-settings">
+      <label>Pembaruan aplikasi</label>
+      <div class="sd-update-row">
+        <span id="sdUpdateVersion" class="sd-update-version">—</span>
+        <button id="sdUpdateCheck" class="sd-btn sd-btn-outline" type="button">
+          <svg class="ic ic-sm"><use href="#i-refresh" /></svg> Periksa pembaruan
+        </button>
+      </div>
+      <small class="sd-field-note" id="sdUpdateNote">—</small>
+    </div>
+    <div class="sd-modal-actions">
+      <button id="sdTest" class="sd-btn sd-btn-outline" type="button">Tes Koneksi</button>
+      <button id="sdSave" class="sd-btn sd-btn-primary" type="button">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<div id="sdToast" class="sd-toast" role="status" aria-live="polite"></div>
+
+<script src="renderer.js"></script>
+</body>
+</html>
