@@ -107,8 +107,8 @@ Hasil:
 
 | Berkas | Ukuran | Cara pakai |
 | --- | --- | --- |
-| `release/SelfDev-1.2.0.AppImage` | ~120 MB | `chmod +x … && ./SelfDev-1.2.0.AppImage` |
-| `release/selfdev-desktop_1.2.0_amd64.deb` | ~95 MB | `sudo dpkg -i …` |
+| `release/SelfDev-1.3.0.AppImage` | ~120 MB | `chmod +x … && ./SelfDev-1.3.0.AppImage` |
+| `release/selfdev-desktop_1.3.0_amd64.deb` | ~95 MB | `sudo dpkg -i …` |
 
 Isi `app.asar` hanya berisi bundle hasil build (`main.js`, `runner.js`, `preload.js`,
 `index.html`, `renderer.js`, `styles.css`) plus ikon — sumber dan test tidak ikut ter-bundle.
