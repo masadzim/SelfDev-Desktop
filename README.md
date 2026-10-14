@@ -27,6 +27,17 @@ Semua credential milik Anda sendiri (**BYOK**), tidak ada server, tidak ada tele
 - **Self-healing**: batas `max_tokens` diturunkan dari pesan provider, streaming ditolak →
   retry non-streaming, parameter usang → retry dengan nama baru, `tools` ditolak → retry polos
 - **API key terenkripsi** lewat keychain sistem (Keychain / libsecret / DPAPI)
+- **Lima layar**: Console, Proyek, Kirim Berkas, Buat Gambar, Dokumentasi — semua di
+  shell yang sama, hanya satu yang aktif
+- **7 workspace mode** dari Android (Umum, Kode, Foto & video, Pengingat, Menulis,
+  Riset, Musik), masing-masing dengan instruksi system prompt yang menentukan
+  tool apa yang boleh dipakai
+- **Lampirkan berkas**: teks/kode/JSON/CSV dibaca apa adanya, PDF dan DOCX
+  diekstrak lapis teksnya, gambar dan PDF hasil pindai dikirim apa adanya
+- **Buat gambar**: endpoint image OpenAI plus Imagen/Gemini, hasil disimpan ke disk
+- **Backup** terenkripsi AES-256-GCM ke satu berkas `.selfdev`
+- **Suara**: bacakan jawaban lewat mesin suara sistem operasi, dan dikte
+- **Dua bahasa**: Indonesia dan Inggris, termasuk seluruh konten Dokumentasi
 - **Sesi persisten** dengan riwayat penuh, ganti model, hapus sesi
 - **Workspace picker** native; semua path tool relatif ke folder tersebut dan dikunci di dalamnya
 - Tema light/dark, ikon SVG inline (tanpa koneksi font eksternal), copy jawaban
@@ -64,7 +75,7 @@ npm run dev        # build + jalankan dengan sourcemap
 
 ```bash
 npm run typecheck            # tsc --noEmit, strict
-npm test                     # 325 test logika & integrasi
+npm test                     # 480 test logika & integrasi
 npm run smoke                # boot headless: bridge, DOM, layout, screenshot
 npm run smoke:e2e            # agent penuh lewat provider tiruan (format OpenAI)
 npm run smoke:e2e:anthropic  # agent penuh lewat provider tiruan (format Anthropic)
@@ -108,7 +119,8 @@ Isi `app.asar` hanya berisi bundle hasil build (`main.js`, `runner.js`, `preload
 scripts/build.mjs          esbuild: main, preload, renderer, runner, tests
 scripts/smoke.mjs          runner smoke/E2E headless (userData sementara)
 scripts/make-icons.py      render assets/icon*.png dari vektor Android
-tests/run.ts               325 test
+src/shared/               provider, mode, i18n, docs, backup, ekonomi, voice
+tests/run.ts               480 test
 tests/mock-provider.mjs    provider tiruan (SSE OpenAI + Anthropic + lambat)
 electron-builder.yml       konfigurasi rilis
 ```
