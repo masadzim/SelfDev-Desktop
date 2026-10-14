@@ -40,6 +40,15 @@
     <path d="M3.5 9.2v9.1a1.7 1.7 0 0 0 1.7 1.7h13.6a1.7 1.7 0 0 0 1.7-1.7v-6.3a1.7 1.7 0 0 0-1.7-1.7H3.5Z"/>
     <path d="M16.4 14.6h.01"/>
   </symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/>
+  </symbol>
+  <symbol id="i-speaker" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 9.5h3L11 6v12L7 14.5H4Z"/><path d="M14.5 9.5a3.5 3.5 0 0 1 0 5"/><path d="M17 7a7 7 0 0 1 0 10"/>
+  </symbol>
+  <symbol id="i-mic-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 6a3 3 0 0 1 6 0v5"/><path d="M15 15.2A3 3 0 0 1 9 14v-3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 10 5.6"/><path d="M18.5 11.5a6.4 6.4 0 0 1-.6 2.6"/><path d="M12 18v3"/><path d="M4 4 20 20"/>
+  </symbol>
   <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
     <circle cx="12" cy="12" r="9"/><path d="M12 11.2v5.4"/><path d="M12 7.7v.01"/>
   </symbol>
@@ -271,6 +280,8 @@
               aria-label="Pesan"
               spellcheck="false"
             ></textarea>
+            <button id="sdMic" class="sd-btn-icon" type="button" title="Dikte"><svg class="ic"><use href="#i-mic" /></svg></button>
+            <button id="sdSpeak" class="sd-btn-icon" type="button" title="Bacakan jawaban terakhir" hidden><svg class="ic"><use href="#i-speaker" /></svg></button>
             <button id="sdStop" class="sd-btn-stop" type="button" title="Hentikan"><svg class="ic"><use href="#i-stop" /></svg></button>
             <button id="sdSend" class="sd-btn-send" type="button" title="Kirim"><svg class="ic"><use href="#i-send" /></svg></button>
           </div>
@@ -543,6 +554,41 @@
             <button id="sdModePlan" class="sd-pill" type="button"><svg class="ic ic-sm"><use href="#i-book" /></svg> Plan</button>
           </div>
           <small class="sd-field-note">Mode Dev mengaktifkan tools lokal; Plan hanya tanya-jawab.</small>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------ voice -->
+      <section class="sd-sec" data-sec="voice">
+        <button class="sd-sec-head" type="button" aria-expanded="false">
+          <span class="sd-sec-icon"><svg class="ic"><use href="#i-speaker" /></svg></span>
+          <span class="sd-sec-text">
+            <span class="sd-sec-title">Suara</span>
+            <span class="sd-sec-sub" id="sdVoiceSub">dikte &amp; bacakan jawaban</span>
+          </span>
+          <span class="sd-sec-chev"><svg class="ic"><use href="#i-chevron" /></svg></span>
+        </button>
+        <div class="sd-sec-body">
+          <div id="sdVoiceNotice" class="sd-notice warn" hidden>
+            <span class="sd-notice-icon"><svg class="ic ic-sm"><use href="#i-alert" /></svg></span>
+            <span class="sd-notice-text" id="sdVoiceNoticeText"></span>
+          </div>
+          <label class="sd-check">
+            <input id="sdSpeakReplies" type="checkbox" />
+            <span>Automatis bacakan jawaban</span>
+          </label>
+          <label class="sd-check">
+            <input id="sdReadCode" type="checkbox" />
+            <span>Baca blok kode juga (defaultnya dilewati)</span>
+          </label>
+          <div class="sd-field" style="margin-top:.6rem">
+            <label for="sdVoice">Suara</label>
+            <select id="sdVoice"></select>
+          </div>
+          <div class="sd-btn-row">
+            <button id="sdVoiceTest" class="sd-btn sd-btn-outline sd-btn-sm" type="button"><svg class="ic ic-sm"><use href="#i-speaker" /></svg> Uji suara</button>
+            <button id="sdVoiceStop" class="sd-btn sd-btn-outline sd-btn-sm" type="button" hidden>Berhenti</button>
+          </div>
+          <small class="sd-field-note">Pakai mesin suara sistem operasi. Mikrofon memakai layanan pengenalan suara browser dan tidak selalu tersedia di desktop.</small>
         </div>
       </section>
 

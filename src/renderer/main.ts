@@ -102,6 +102,7 @@ interface Bridge {
   setToolsEnabled(on: boolean): Promise<boolean>;
   setSpeakReplies(on: boolean): Promise<boolean>;
   setLanguage(lang: 'id' | 'en'): Promise<'id' | 'en'>;
+  setLanguage(lang: 'id' | 'en'): Promise<'id' | 'en'>;
   setOnboarded(done: boolean): Promise<boolean>;
   listProjects(): Promise<Project[]>;
   saveProject(input: Partial<Project> & { name: string }): Promise<Project>;
@@ -179,6 +180,8 @@ interface UiState {
   workspaceRoot: string | null;
   workspaceMode: WorkspaceMode;
   toolsEnabled: boolean;
+  speakReplies: boolean;
+  language: 'id' | 'en';
   projects: Project[];
   activeProjectId: string | null;
   onboarded: boolean;
@@ -207,6 +210,8 @@ const ui: UiState = {
   workspaceRoot: null,
   workspaceMode: 'code',
   toolsEnabled: true,
+  speakReplies: false,
+  language: 'id',
   projects: [],
   activeProjectId: null,
   onboarded: false,
@@ -232,7 +237,9 @@ function grab(): void {
     'screenWelcome', 'sdWelcomeStart', 'sdWelcomeSkip',
     'screenProjects', 'sdProjectList', 'sdProjectNew', 'sdProjectAll',
     'screenDocs', 'sdDocsList',
-    'sdAttachBtn', 'sdAttachStrip',
+    'sdAttachBtn', 'sdAttachStrip', 'sdMic', 'sdSpeak',
+    'sdSpeakReplies', 'sdReadCode', 'sdVoice', 'sdVoiceTest', 'sdVoiceStop', 'sdVoiceSub',
+    'sdVoiceNotice', 'sdVoiceNoticeText',
     'screenDispatch', 'sdDispatchPick', 'sdDispatchClear', 'sdDispatchSummary', 'sdDispatchList',
     'sdDispatchPrompt', 'sdDispatchSend', 'sdDispatchStatus',
     'screenImages', 'sdImgModel', 'sdImgModelNote', 'sdImgPrompt', 'sdImgSizes', 'sdImgRun',
@@ -569,6 +576,134 @@ async function dispatchToConsole(): Promise<void> {
   if (status) status.hidden = true;
   showScreen('console');
   await sendMessageText(message.text, message.attachments);
+}
+
+/* ----------------------------------------------------------------- voice -- */
+
+import {
+  dictate,
+  dictationAvailable,
+  listVoices,
+  speak,
+  speechAvailable,
+  stopSpeaking,
+  type SpeechState,
+  type VoiceHandle
+} from './voice';
+
+let voiceHandle: VoiceHandle | null = null;
+let voiceState: SpeechState = 'idle';
+let voiceName: string | null = null;
+let includeCode = false;
+
+function renderVoice(): void {
+  const mic = el.sdMic as HTMLButtonElement | undefined;
+  const speakBtn = el.sdSpeak as HTMLButtonElement | undefined;
+  const stop = el.sdVoiceStop as HTMLButtonElement | undefined;
+  if (mic) {
+    mic.classList.toggle('listening', voiceState === 'listening');
+    mic.innerHTML = icon(voiceState === 'listening' ? 'mic-off' : 'mic', 'ic');
+    mic.title = dictationAvailable() ? 'Dikte' : 'Dikte tidak tersedia di mesin ini';
+  }
+  if (speakBtn) speakBtn.hidden = !speechAvailable();
+  if (stop) stop.hidden = voiceState !== 'speaking';
+
+  const notice = el.sdVoiceNotice as HTMLElement | undefined;
+  const text = el.sdVoiceNoticeText as HTMLElement | undefined;
+  if (notice && text) {
+    const problems: string[] = [];
+    if (!speechAvailable()) problems.push('Mesin suara sistem operasi tidak terdeteksi, jadi membacakan jawaban dimatikan.');
+    if (!dictationAvailable()) problems.push('Layanan pengenalan suara browser tidak tersedia, jadi dikte dimatikan.');
+    notice.hidden = problems.length === 0;
+    text.textContent = problems.join(' ');
+  }
+
+  const sub = el.sdVoiceSub as HTMLElement | undefined;
+  if (sub) {
+    const on: string[] = [];
+    if (speechAvailable()) on.push(ui.speakReplies ? 'bacakan otomatis' : 'baca manual');
+    if (dictationAvailable()) on.push('dikte');
+    sub.textContent = on.length ? on.join(' · ') : 'tidak tersedia di mesin ini';
+  }
+
+  const select = el.sdVoice as HTMLSelectElement | undefined;
+  if (select && select.dataset.built !== '1') {
+    const voices = listVoices();
+    select.dataset.built = '1';
+    select.innerHTML = voices.length
+      ? voices.map((v) => `<option value="${escapeHtml(v.name)}">${escapeHtml(`${v.name} (${v.lang})`)}</option>`).join('')
+      : '<option value="">—</option>';
+    select.value = voiceName ?? voices[0]?.name ?? '';
+    voiceName = select.value || null;
+  }
+}
+
+function speakText(text: string): void {
+  const handle = speak(text, {
+    lang: ui.language,
+    voiceName,
+    includeCode,
+    onState: (next) => {
+      voiceState = next;
+      renderVoice();
+    }
+  });
+  if (!handle) {
+    toast('Mesin suara tidak tersedia', 'bad');
+    return;
+  }
+  voiceHandle = handle;
+}
+
+function speakLastReply(): void {
+  const session = activeSession();
+  const last = [...(session?.messages ?? [])].reverse().find((m) => m.role === 'assistant' && m.text.trim());
+  if (!last) {
+    toast('Belum ada jawaban untuk dibacakan', 'bad');
+    return;
+  }
+  speakText(last.text);
+}
+
+/** The reply as it finishes, so a long answer starts speaking while it streams. */
+function maybeSpeakReplies(): void {
+  if (!ui.speakReplies) return;
+  const session = activeSession();
+  const last = [...(session?.messages ?? [])].reverse().find((m) => m.role === 'assistant');
+  if (!last?.text.trim()) return;
+  speakText(last.text);
+}
+
+function toggleDictation(): void {
+  if (voiceState === 'listening') {
+    voiceHandle?.stop();
+    voiceHandle = null;
+    return;
+  }
+  const ta = el.sdInput as HTMLTextAreaElement;
+  const before = ta.value;
+  const handle = dictate(ui.language, {
+    onPartial: (text) => {
+      ta.value = `${before}${before && !before.endsWith(' ') ? ' ' : ''}${text}`;
+      autosize();
+    },
+    onFinal: (text) => {
+      ta.value = `${before}${before && !before.endsWith(' ') ? ' ' : ''}${text}`;
+      autosize();
+      ta.focus();
+    },
+    onState: (next) => {
+      voiceState = next;
+      if (next !== 'listening') voiceHandle = null;
+      renderVoice();
+    },
+    onError: (message) => toast(message, 'bad')
+  });
+  if (!handle) {
+    toast('Dikte tidak tersedia di mesin ini', 'bad');
+    return;
+  }
+  voiceHandle = handle;
 }
 
 /* ---------------------------------------------------------------- images -- */
@@ -1117,6 +1252,8 @@ async function refresh(fromMain = true): Promise<void> {
     ui.workspaceRoot = state.workspaceRoot;
     ui.workspaceMode = state.workspaceMode;
     ui.toolsEnabled = state.toolsEnabled !== false;
+    ui.speakReplies = state.speakReplies === true;
+    ui.language = state.language === 'en' ? 'en' : 'id';
     ui.onboarded = state.onboarded === true;
     ui.projects = state.projects ?? [];
     ui.activeProjectId = state.activeProjectId ?? null;
@@ -1302,6 +1439,10 @@ function handleRunEvent(evt: RunEvent): void {
         setTaskState(card, evt.status === 'error' ? 'error' : evt.status === 'stopped' ? 'stopped' : evt.status === 'max_iterations' ? 'max_iterations' : 'done', label);
       }
       setStatus(evt.status === 'error' ? 'error' : evt.status === 'stopped' ? 'dihentikan' : 'idle', evt.status === 'error');
+      if (evt.status === 'done') {
+        // A beat for the final text to land before it is read out.
+        setTimeout(() => maybeSpeakReplies(), 250);
+      }
       // pull the authoritative, persisted conversation back from main
       void refresh().catch((err) => toast(`Gagal refresh: ${messageOf(err)}`, 'bad'));
       break;
@@ -1897,6 +2038,9 @@ async function openSettings(): Promise<void> {
   renderModels();
   renderKeyBadge();
   paintMarks(el.sdSettings);
+  const speakToggle = el.sdSpeakReplies as HTMLInputElement | undefined;
+  if (speakToggle) speakToggle.checked = ui.speakReplies;
+  renderVoice();
   syncManualModelState();
   applyThemeButtons();
   syncModeButtons();
@@ -2149,6 +2293,34 @@ function wireEvents(): void {
   (el.sdProjectNew as HTMLButtonElement).addEventListener('click', () => editProject(''));
   (el.sdProjectAll as HTMLButtonElement).addEventListener('click', () => void openProject(null));
 
+  // voice
+  (el.sdMic as HTMLButtonElement)?.addEventListener('click', () => toggleDictation());
+  (el.sdSpeak as HTMLButtonElement)?.addEventListener('click', () => speakLastReply());
+  (el.sdVoiceStop as HTMLButtonElement)?.addEventListener('click', () => {
+    stopSpeaking();
+    voiceState = 'idle';
+    renderVoice();
+  });
+  (el.sdVoiceTest as HTMLButtonElement)?.addEventListener('click', () =>
+    speakText('Halo, ini SelfDev. Suara dari mesin sistem operasi Anda.')
+  );
+  (el.sdVoice as HTMLSelectElement)?.addEventListener('change', (e) => {
+    voiceName = (e.target as HTMLSelectElement).value || null;
+  });
+  (el.sdSpeakReplies as HTMLInputElement)?.addEventListener('change', (e) => {
+    const on = (e.target as HTMLInputElement).checked;
+    ui.speakReplies = on;
+    void bridge.setSpeakReplies(on);
+    if (!on) {
+      stopSpeaking();
+      voiceState = 'idle';
+      renderVoice();
+    }
+  });
+  (el.sdReadCode as HTMLInputElement)?.addEventListener('change', (e) => {
+    includeCode = (e.target as HTMLInputElement).checked;
+  });
+
   // attachments & dispatch
   (el.sdAttachBtn as HTMLButtonElement).addEventListener('click', () => void addAttachments());
   (el.sdDispatchPick as HTMLButtonElement).addEventListener('click', () => void addAttachments());
@@ -2398,6 +2570,7 @@ async function init(): Promise<void> {
   }
 
   renderDocs();
+  renderVoice();
   showScreen('console');
   await refresh();
   autosize();

@@ -76,6 +76,7 @@ import { EXTENSION, FORMAT, VERSION, buildPayload, parsePayload, suggestedFilena
 import { sealPayload, openPayload } from '../src/main/backup';
 import { DOCS } from '../src/shared/docs';
 import { composeAttachmentText, humanBytes, messageFor } from '../src/shared/attachments';
+import { CHUNK_LIMIT, chunks, fromMarkdown } from '../src/shared/spokenText';
 import { extractFile, kindFor, mimeFor } from '../src/main/tools/extract';
 
 let passed = 0;
@@ -1352,6 +1353,46 @@ section('attachment extraction');
   // knows something was sent even though it cannot read it.
   const empty = messageFor('', [{ path: '/x/a.bin', name: 'a.bin', bytes: 10, kind: 'binary', mimeType: 'application/octet-stream', text: '', native: false, note: 'Tidak ada pembaca teks.' }], undefined);
   check('an unreadable file is still named', empty.text.includes('a.bin'), empty.text);
+}
+
+// ------------------------------------------------------------------ voice
+
+section('spoken text');
+{
+  // A synthesiser reads markup out loud literally, so it has to come off first.
+  eq('bold loses its asterisks', fromMarkdown('Ini **tebal** sekali.'), 'Ini tebal sekali.');
+  eq('italic loses its asterisks', fromMarkdown('Ini *miring* sekali.'), 'Ini miring sekali.');
+  eq('inline code keeps its words', fromMarkdown('pakai `a < b` di sini'), 'pakai a < b di sini');
+  eq('links keep their label, not their url', fromMarkdown('lihat [dokumentasi](https://x.dev)'), 'lihat dokumentasi');
+  eq('images keep their alt text', fromMarkdown('![grafik penjualan](a.png)'), 'grafik penjualan');
+  eq('headings lose their hashes', fromMarkdown('## Judul\n\nIsi.'), 'Judul\n\nIsi.');
+  eq('bullets lose their markers', fromMarkdown('- satu\n- dua'), 'satu\ndua');
+  eq('ordered lists lose their numbers', fromMarkdown('1. satu\n2. dua'), 'satu\ndua');
+  eq('quotes lose their marker', fromMarkdown('> kutipan'), 'kutipan');
+  eq('rules become nothing', fromMarkdown('sebelum\n\n---\n\nsesudah'), 'sebelum\n\nsesudah');
+  eq('entities are spoken', fromMarkdown('a &amp; b &lt; c &gt; d'), 'a dan b kurang dari c lebih dari d');
+  eq('a done task reads as done', fromMarkdown('- [x] sudah'), 'Selesai. sudah');
+  eq('an open task reads as pending', fromMarkdown('- [ ] belum'), 'Belum. belum');
+  // The row separator has to survive, or two rows read as one run-on sentence.
+  eq('a table row reads as a phrase', fromMarkdown('| a | b |\n|---|---|\n| 1 | 2 |').replace(/\n{2,}/g, '\n'), 'a, b\n1, 2');
+  check('the divider keeps the rows apart', fromMarkdown('| a | b |\n|---|---|\n| 1 | 2 |').includes('a, b\n'), 'rows welded together');
+  const skipped = fromMarkdown('lihat:\n\n```js\nconst x = 1;\n```\n\nselesai');
+  check('code is skipped by default', !skipped.includes('const x'), skipped);
+  check('the words around it survive', skipped.includes('lihat') && skipped.includes('selesai'), skipped);
+  check('a blank line is not read as a pause', !/^[ \t]+$/m.test(skipped), JSON.stringify(skipped));
+  check('code can be read on request', fromMarkdown('```\nkode\n```', true).includes('kode'), fromMarkdown('```\nkode\n```', true));
+  eq('the chunk limit is respected', CHUNK_LIMIT, 220);
+
+  // Chunking is what stops a long answer from starting minutes late.
+  const sentence = 'Ini kalimat yang sengaja dibuat panjang sekali supayaakan Until chunking benar-benar working. ';
+  const long = sentence.repeat(5);
+  const parts = chunks(long);
+  check('a long answer is split', parts.length > 1, JSON.stringify(parts));
+  check('every chunk fits', parts.every((c) => c.length <= CHUNK_LIMIT + 20), JSON.stringify(parts.map((c) => c.length)));
+  eq('nothing is lost', parts.join(' ').replace(/\s+/g, ' '), long.trim().replace(/\s+/g, ' '));
+  eqList('empty text has no chunks', chunks('   '), []);
+  eqList('a decimal does not end a sentence', chunks('Nilainya 1.250 rupiah today.'), ['Nilainya 1.250 rupiah today.']);
+  eq('a run-on sentence is still broken', chunks('x'.repeat(CHUNK_LIMIT * 2 + 10)).length >= 2, true);
 }
 
 // ------------------------------------------------------------------ summary

@@ -1855,3 +1855,15 @@ body.dark .sd-toolpop button .ic { color: var(--accent); }
   flex: 0 0 auto;
 }
 .sd-dispatch-note { font-size: 0.68rem; color: var(--warn-text); flex: 0 0 auto; }
+
+/* ------------------------------------------------------------------ voice */
+.sd-btn-icon.listening { color: var(--bad-text); border-color: var(--bad-text); }
+.sd-btn-icon.listening .ic { animation: sd-pulse 1.1s ease-in-out infinite; }
+@keyframes sd-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sd-btn-icon.listening .ic { animation: none; }
+}
+.sd-voice-select { width: 100%; }
