@@ -54,7 +54,8 @@ import {
   resolveForDiscovery,
   streamUrl
 } from '../src/shared/providers';
-import type { AppConfig, ChatMessage, ProviderId, RunEvent, Session, WireApi } from '../src/shared/types';
+import type { AppConfig, ChatMessage, ProviderId, RunEvent, Session, WireApi, WorkspaceMode } from '../src/shared/types';
+import { MODES, modeUsesTools, promptFor } from '../src/shared/modes';
 
 let passed = 0;
 let failed = 0;
@@ -606,7 +607,8 @@ section('agent loop (end-to-end with mock provider)');
       const store = {
         getConfig: () => cfg,
         getWorkspaceRoot: () => root,
-        getMode: () => 'dev' as const,
+        getMode: () => 'code' as WorkspaceMode,
+        getToolsEnabled: () => true,
         getSession: () => session,
         touch: () => { touched++; },
         flush: async () => { flushed++; }
@@ -662,7 +664,8 @@ section('agent loop (end-to-end with mock provider)');
     await withTempDir(async (root) => {
       const cfg = normalizeConfig({ provider: 'anthropic', apiKey: 'k', model: 'm', system: 's' });
       const session: Session = { id: 's2', title: 't', model: 'm', messages: [], createdAt: 1, updatedAt: 1 };
-      const store = { getConfig: () => cfg, getWorkspaceRoot: () => root, getMode: () => 'dev' as const, getSession: () => session, touch: () => undefined, flush: async () => undefined };
+      const store = { getConfig: () => cfg, getWorkspaceRoot: () => root, getMode: () => 'code' as WorkspaceMode,
+        getToolsEnabled: () => true, getSession: () => session, touch: () => undefined, flush: async () => undefined };
       globalThis.fetch = async () => new Response('nope', { status: 500, statusText: 'Server Error' });
       const status = await runAgent({ store: store as never, emit: () => undefined }, 's2', 'hai', new AbortController().signal);
       eq('agent reports error', status, 'error');
@@ -673,7 +676,8 @@ section('agent loop (end-to-end with mock provider)');
     await withTempDir(async (root) => {
       const cfg = normalizeConfig({ provider: 'anthropic', apiKey: 'k', model: 'm', system: 's' });
       const session: Session = { id: 's3', title: 't', model: 'm', messages: [], createdAt: 1, updatedAt: 1 };
-      const store = { getConfig: () => cfg, getWorkspaceRoot: () => root, getMode: () => 'dev' as const, getSession: () => session, touch: () => undefined, flush: async () => undefined };
+      const store = { getConfig: () => cfg, getWorkspaceRoot: () => root, getMode: () => 'code' as WorkspaceMode,
+        getToolsEnabled: () => true, getSession: () => session, touch: () => undefined, flush: async () => undefined };
       globalThis.fetch = async () => sseResponse([
         'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}\n\n'
       ]);
@@ -688,7 +692,8 @@ section('agent loop (end-to-end with mock provider)');
     await withTempDir(async (root) => {
       const cfg = normalizeConfig({ provider: 'anthropic', apiKey: 'k', model: 'm', system: 's' });
       const session: Session = { id: 's4', title: 't', model: 'm', messages: [], createdAt: 1, updatedAt: 1 };
-      const store = { getConfig: () => cfg, getWorkspaceRoot: () => root, getMode: () => 'plan' as const, getSession: () => session, touch: () => undefined, flush: async () => undefined };
+      const store = { getConfig: () => cfg, getWorkspaceRoot: () => root, getMode: () => 'writing' as WorkspaceMode,
+        getToolsEnabled: () => true, getSession: () => session, touch: () => undefined, flush: async () => undefined };
       let calls = 0;
       globalThis.fetch = async () => {
         calls++;

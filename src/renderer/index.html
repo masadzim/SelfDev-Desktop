@@ -226,9 +226,14 @@
         <span class="sd-mark sd-mark-brand" data-mark></span>
         <span>SelfDev<span class="sd-brand-sub"> · AI Developer Console</span></span>
       </div>
+      <nav class="sd-nav" aria-label="Layar">
+        <button class="sd-nav-btn is-on" type="button" data-screen="console" title="Console"><svg class="ic ic-sm"><use href="#i-terminal" /></svg></button>
+        <button class="sd-nav-btn" type="button" data-screen="projects" title="Proyek"><svg class="ic ic-sm"><use href="#i-folder" /></svg></button>
+        <button class="sd-nav-btn" type="button" data-screen="docs" title="Dokumentasi"><svg class="ic ic-sm"><use href="#i-book" /></svg></button>
+      </nav>
       <div class="sd-header-tools">
         <span id="sdStatus" class="sd-status">idle</span>
-        <button id="sdModeToggle" class="sd-mode-toggle" type="button" title="Ganti mode (Dev = tools aktif, Plan = tanya-jawab)">Dev</button>
+        <button id="sdModeToggle" class="sd-mode-toggle" type="button" title="Ganti mode workspace">Kode</button>
         <button id="sdSideToggle" class="sd-btn-icon" type="button" title="Tampilkan / sembunyikan sesi"><svg class="ic"><use href="#i-list" /></svg></button>
         <button id="sdClearSessions" class="sd-btn-icon" type="button" title="Hapus semua sesi"><svg class="ic"><use href="#i-broom" /></svg></button>
         <button id="sdNewSession" class="sd-btn-icon" type="button" title="Sesi baru (Ctrl+N)"><svg class="ic"><use href="#i-plus" /></svg></button>
@@ -236,6 +241,7 @@
       </div>
     </header>
 
+    <div id="screenConsole" class="sd-screen is-on" data-screen-body="console">
     <div class="sd-layout">
       <aside id="sdSidebar" class="sd-sidebar" aria-label="Sessions">
         <div class="sd-sidebar-head">
@@ -269,6 +275,29 @@
         </div>
       </main>
     </div>
+    </div>
+
+    <!-- ============================================================== projects -->
+    <section id="screenProjects" class="sd-screen sd-page" data-screen-body="projects" hidden>
+      <div class="sd-page-head">
+        <h2>Proyek</h2>
+        <p>Sesi dikelompokkan per proyek. Pilih satu untuk memfilter sidebar, atau biarkan kosong untuk workspace bebas.</p>
+        <div class="sd-btn-row">
+          <button id="sdProjectNew" class="sd-btn sd-btn-primary sd-btn-sm" type="button"><svg class="ic ic-sm"><use href="#i-plus" /></svg> Proyek baru</button>
+          <button id="sdProjectAll" class="sd-btn sd-btn-outline sd-btn-sm" type="button">Semua sesi</button>
+        </div>
+      </div>
+      <div id="sdProjectList" class="sd-project-list"></div>
+    </section>
+
+    <!-- ================================================================== docs -->
+    <section id="screenDocs" class="sd-screen sd-page" data-screen-body="docs" hidden>
+      <div class="sd-page-head">
+        <h2>Dokumentasi</h2>
+        <p>Jawaban cepat untuk hal yang paling sering ditanya.</p>
+      </div>
+      <div id="sdDocsList" class="sd-docs-list"></div>
+    </section>
   </div>
 
   <footer class="sd-footer">
@@ -485,6 +514,43 @@
     <div class="sd-modal-actions">
       <button id="sdSaveMain" class="sd-btn sd-btn-primary" type="button"><svg class="ic ic-sm"><use href="#i-check" /></svg> Simpan Pengaturan</button>
     </div>
+  </div>
+</div>
+
+<!-- ================================================================ welcome
+
+     Shown once, on first run. Its whole job is to send the person to the one
+     screen that matters when there is no API key yet. -->
+<div id="screenWelcome" class="sd-welcome" role="dialog" aria-modal="true" aria-labelledby="sdWelcomeTitle" hidden>
+  <div class="sd-welcome-inner">
+    <div class="sd-welcome-mark" data-mark="welcome"></div>
+    <h1 id="sdWelcomeTitle">Selamat datang di SelfDev</h1>
+    <p class="sd-welcome-lead">
+      Asisten coding opencode-style di desktop Anda. API key Anda sendiri, tools lokal,
+      tidak ada server di tengah.
+    </p>
+    <div class="sd-welcome-cards">
+      <div class="sd-welcome-card">
+        <span class="sd-welcome-card-icon"><svg class="ic"><use href="#i-key" /></svg></span>
+        <b>BYOK</b>
+        <p>17 provider. Key disimpan terenkripsi di perangkat ini.</p>
+      </div>
+      <div class="sd-welcome-card">
+        <span class="sd-welcome-card-icon"><svg class="ic ic-sm"><use href="#i-terminal" /></svg></span>
+        <b>Tools lokal</b>
+        <p>Baca, tulis, edit, grep, glob, jalankan kode, cari web.</p>
+      </div>
+      <div class="sd-welcome-card">
+        <span class="sd-welcome-card-icon"><svg class="ic ic-sm"><use href="#i-folder" /></svg></span>
+        <b>Project</b>
+        <p>Kelompokkan sesi per proyek dan ganti mode kerja.</p>
+      </div>
+    </div>
+    <div class="sd-welcome-actions">
+      <button id="sdWelcomeStart" class="sd-btn sd-btn-primary" type="button"><svg class="ic ic-sm"><use href="#i-check" /></svg> Mulai — atur API</button>
+      <button id="sdWelcomeSkip" class="sd-btn sd-btn-outline" type="button">Lewati dulu</button>
+    </div>
+    <small class="sd-welcome-note">Bisa diubah kapan saja di Pengaturan.</small>
   </div>
 </div>
 

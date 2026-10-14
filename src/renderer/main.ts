@@ -13,9 +13,12 @@ import {
   repairModelFor,
   supportsDiscovery
 } from '../shared/providers';
+import { DOCS } from '../shared/docs';
+import { MODES, modeFor, modeUsesTools } from '../shared/modes';
 import type {
   AppConfig,
   ModelEntry,
+  Project,
   ProviderId,
   ProviderPreset,
   RunEvent,
@@ -38,6 +41,12 @@ interface StatePayload {
   workspaceMode: WorkspaceMode;
   tools: ToolMeta[];
   keyProtection: 'keychain' | 'plain';
+  onboarded: boolean;
+  toolsEnabled: boolean;
+  speakReplies: boolean;
+  language: 'id' | 'en';
+  projects: Project[];
+  activeProjectId: string | null;
 }
 
 interface ConnectionReport {
@@ -82,6 +91,14 @@ interface Bridge {
     apiKey: string;
   }): Promise<ModelsReport>;
   setMode(mode: WorkspaceMode): Promise<WorkspaceMode>;
+  setToolsEnabled(on: boolean): Promise<boolean>;
+  setSpeakReplies(on: boolean): Promise<boolean>;
+  setLanguage(lang: 'id' | 'en'): Promise<'id' | 'en'>;
+  setOnboarded(done: boolean): Promise<boolean>;
+  listProjects(): Promise<Project[]>;
+  saveProject(input: Partial<Project> & { name: string }): Promise<Project>;
+  deleteProject(id: string): Promise<Project[]>;
+  setActiveProject(id: string | null): Promise<string | null>;
   setTheme(theme: 'light' | 'dark'): Promise<'light' | 'dark'>;
   pickWorkspace(): Promise<string | null>;
   revealWorkspace(): Promise<boolean>;
@@ -122,6 +139,11 @@ interface UiState {
   activeSessionId: string | null;
   workspaceRoot: string | null;
   workspaceMode: WorkspaceMode;
+  toolsEnabled: boolean;
+  projects: Project[];
+  activeProjectId: string | null;
+  onboarded: boolean;
+  screen: ScreenId;
   tools: ToolMeta[];
   keyProtection: 'keychain' | 'plain';
   presets: ProviderPreset[];
@@ -144,7 +166,12 @@ const ui: UiState = {
   sessions: [],
   activeSessionId: null,
   workspaceRoot: null,
-  workspaceMode: 'dev',
+  workspaceMode: 'code',
+  toolsEnabled: true,
+  projects: [],
+  activeProjectId: null,
+  onboarded: false,
+  screen: 'console' as ScreenId,
   tools: [],
   keyProtection: 'keychain',
   presets: [],
@@ -163,6 +190,9 @@ function grab(): void {
     'sdSidebar', 'sdSessionList', 'sdSessionCount', 'sdMessages', 'sdInput', 'sdSend', 'sdStop',
     'sdToolsBar', 'sdToolPop', 'sdModelLabel', 'sdWsHint', 'sdThemeBtn', 'sdWorkspaceBtn',
     'sdWorkspaceLabel', 'sdModelList', 'sdToast',
+    'screenWelcome', 'sdWelcomeStart', 'sdWelcomeSkip',
+    'screenProjects', 'sdProjectList', 'sdProjectNew', 'sdProjectAll',
+    'screenDocs', 'sdDocsList',
     'sdUpdate', 'sdUpdateText', 'sdUpdateBar', 'sdUpdateAction', 'sdUpdateDismiss',
     'sdUpdateCheck', 'sdUpdateVersion', 'sdUpdateNote',
     // settings dialog
@@ -298,12 +328,9 @@ function renderHeader(): void {
   if (label) label.textContent = ui.config.model || '—';
   const toggle = el.sdModeToggle as HTMLButtonElement | undefined;
   if (toggle) {
-    toggle.textContent = ui.workspaceMode === 'dev' ? 'Dev' : 'Plan';
-    toggle.classList.toggle('plan', ui.workspaceMode === 'plan');
-    toggle.title =
-      ui.workspaceMode === 'dev'
-        ? 'Mode Dev — tools aktif. Klik untuk pindah ke Plan (tanya-jawab saja).'
-        : 'Mode Plan — tanya-jawab saja. Klik untuk kembali ke Dev (tools aktif).';
+    const mode = modeFor(ui.workspaceMode);
+    toggle.textContent = mode.label;
+    toggle.title = `${mode.summary}\nKlik untuk ganti mode workspace.`;
   }
   const send = el.sdSend as HTMLButtonElement | undefined;
   const stop = el.sdStop as HTMLButtonElement | undefined;
@@ -311,21 +338,216 @@ function renderHeader(): void {
     stop.style.display = ui.running ? 'inline-flex' : 'none';
     send.style.display = ui.running ? 'none' : 'inline-flex';
   }
+  renderNav();
+}
+
+/* --------------------------------------------------------------- screens -- */
+
+type ScreenId = 'console' | 'projects' | 'docs';
+
+/** One screen in the document flow at a time, so none steals the other's scroll. */
+function showScreen(id: ScreenId): void {
+  ui.screen = id;
+  document.querySelectorAll<HTMLElement>('[data-screen-body]').forEach((node) => {
+    const on = node.dataset.screenBody === id;
+    node.hidden = !on;
+    node.classList.toggle('is-on', on);
+  });
+  renderNav();
+}
+
+function renderNav(): void {
+  document.querySelectorAll<HTMLButtonElement>('[data-screen]').forEach((btn) => {
+    btn.classList.toggle('is-on', btn.dataset.screen === ui.screen);
+  });
+}
+
+/* ------------------------------------------------------------------ docs -- */
+
+function renderDocs(): void {
+  const box = el.sdDocsList as HTMLElement | undefined;
+  if (!box) return;
+  if (box.dataset.built === '1') return;
+  box.dataset.built = '1';
+
+  box.innerHTML = DOCS.map(
+    (d, i) => `<article class="sd-doc${i === 0 ? ' open' : ''}">
+      <button class="sd-doc-head" type="button" aria-expanded="${i === 0}">
+        <span>${escapeHtml(d.title)}</span>
+        <span class="sd-sec-chev">${icon('chevron', 'ic ic-sm')}</span>
+      </button>
+      <div class="sd-doc-body">
+        ${d.body
+          .map((block) =>
+            block.kind === 'p'
+              ? `<p>${renderMarkdown(block.text)}</p>`
+              : `<ul>${block.items.map((t) => `<li>${renderMarkdown(t)}</li>`).join('')}</ul>`
+          )
+          .join('')}
+      </div>
+    </article>`
+  ).join('');
+
+  box.querySelectorAll<HTMLButtonElement>('.sd-doc-head').forEach((head) => {
+    head.addEventListener('click', () => {
+      const doc = head.closest('.sd-doc');
+      const open = doc?.classList.toggle('open');
+      head.setAttribute('aria-expanded', String(Boolean(open)));
+    });
+  });
+}
+
+/* -------------------------------------------------------------- projects -- */
+
+function sessionsInProject(projectId: string | null): number {
+  return ui.sessions.filter((s) => (s.projectId ?? null) === projectId).length;
+}
+
+function renderProjects(): void {
+  const box = el.sdProjectList as HTMLElement | undefined;
+  if (!box) return;
+
+  if (!ui.projects.length) {
+    box.innerHTML = `<p class="sd-empty-note">Belum ada proyek. Sesi yang dibuat sekarang masuk ke workspace bebas.</p>`;
+    return;
+  }
+
+  box.innerHTML = ui.projects
+    .map((p) => {
+      const on = p.id === ui.activeProjectId;
+      const count = sessionsInProject(p.id);
+      return `<div class="sd-project${on ? ' is-on' : ''}">
+        <div class="sd-project-top">
+          <span class="sd-project-name">${escapeHtml(p.name)}</span>
+          <span class="sd-status ${p.status}">${escapeHtml(p.status)}</span>
+        </div>
+        ${p.description ? `<div class="sd-project-desc">${escapeHtml(p.description)}</div>` : ''}
+        <div class="sd-project-meta">
+          <span>${count} sesi</span>
+          ${p.language ? `<span>${escapeHtml(p.language)}</span>` : ''}
+          <span>${new Date(p.updatedAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+        </div>
+        <div class="sd-project-actions">
+          <button class="sd-btn sd-btn-outline sd-btn-sm" type="button" data-open="${escapeHtml(p.id)}">${on ? 'Dibuka' : 'Buka'}</button>
+          <button class="sd-btn sd-btn-outline sd-btn-sm" type="button" data-edit="${escapeHtml(p.id)}">${icon('pencil', 'ic ic-xs')} Ubah</button>
+          <button class="sd-btn sd-btn-outline sd-btn-sm" type="button" data-del="${escapeHtml(p.id)}">${icon('trash', 'ic ic-xs')} Hapus</button>
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  box.querySelectorAll<HTMLButtonElement>('[data-open]').forEach((btn) => {
+    btn.addEventListener('click', () => void openProject(btn.dataset.open ?? null));
+  });
+  box.querySelectorAll<HTMLButtonElement>('[data-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => editProject(btn.dataset.edit ?? ''));
+  });
+  box.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((btn) => {
+    btn.addEventListener('click', () => void deleteProject(btn.dataset.del ?? ''));
+  });
+}
+
+async function openProject(id: string | null): Promise<void> {
+  ui.activeProjectId = await bridge.setActiveProject(id);
+  const state = await bridge.getState();
+  ui.sessions = state.sessions;
+  ui.activeSessionId = state.activeSessionId;
+  renderProjects();
+  renderSessions();
+  toast(id ? `Proyek: ${ui.projects.find((p) => p.id === id)?.name ?? ''}` : 'Semua sesi', 'ok');
+  showScreen('console');
+}
+
+function editProject(id: string): void {
+  const existing = id ? ui.projects.find((p) => p.id === id) : undefined;
+  const name = window.prompt('Nama proyek', existing?.name ?? '');
+  if (name === null) return;
+  if (!name.trim()) return;
+  const description = window.prompt('Deskripsi (opsional)', existing?.description ?? '') ?? existing?.description ?? '';
+  const language = window.prompt('Bahasa / stack (opsional)', existing?.language ?? '') ?? existing?.language ?? '';
+  void bridge.saveProject({
+    id,
+    name,
+    description,
+    language,
+    status: existing?.status ?? 'active'
+  }).then(async (saved) => {
+    ui.projects = await bridge.listProjects();
+    if (!existing) ui.projects = [saved, ...ui.projects.filter((p) => p.id !== saved.id)];
+    renderProjects();
+    toast(existing ? 'Proyek diperbarui' : 'Proyek dibuat', 'ok');
+  });
+}
+
+async function deleteProject(id: string): Promise<void> {
+  const project = ui.projects.find((p) => p.id === id);
+  if (!project) return;
+  if (!window.confirm(`Hapus proyek "${project.name}"?\n\nSesi di dalamnya tidak dihapus, hanya lepas dari proyek.`)) return;
+  ui.projects = await bridge.deleteProject(id);
+  renderProjects();
+  toast('Proyek dihapus', 'ok');
+}
+
+/* ----------------------------------------------------------- mode picker -- */
+
+function toggleModePicker(force?: boolean): void {
+  const existing = document.querySelector('.sd-mode-pop');
+  const open = force ?? !existing;
+  if (!open) {
+    existing?.remove();
+    return;
+  }
+  const anchor = el.sdModeToggle as HTMLElement | undefined;
+  if (!anchor) return;
+  const pop = document.createElement('div');
+  pop.className = 'sd-mode-pop';
+  pop.innerHTML = MODES.map(
+    (m) => `<button class="sd-mode-row${m.id === ui.workspaceMode ? ' is-on' : ''}" type="button" data-mode="${m.id}">
+      <b>${escapeHtml(m.label)}</b><span>${escapeHtml(m.summary)}</span></button>`
+  ).join('');
+  document.querySelector('.sd-window')?.appendChild(pop);
+
+  const rect = anchor.getBoundingClientRect();
+  const host = (document.querySelector('.sd-window') as HTMLElement).getBoundingClientRect();
+  pop.style.top = `${rect.bottom - host.top + 6}px`;
+  pop.style.left = `${Math.max(8, Math.min(rect.left - host.left, host.width - 240))}px`;
+
+  pop.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const next = btn.dataset.mode as WorkspaceMode;
+      pop.remove();
+      if (next === ui.workspaceMode) return;
+      ui.workspaceMode = next;
+      void bridge.setMode(next);
+      renderHeader();
+      renderToolChips();
+      renderMessages();
+      toast(`Mode ${modeFor(next).label}`, 'ok');
+    });
+  });
+
+  const dismiss = (e: Event): void => {
+    if (pop.contains(e.target as Node)) return;
+    pop.remove();
+    document.removeEventListener('mousedown', dismiss);
+  };
+  setTimeout(() => document.addEventListener('mousedown', dismiss), 0);
 }
 
 function renderSessions(): void {
   const list = el.sdSessionList as HTMLElement | undefined;
   const count = el.sdSessionCount as HTMLElement | undefined;
   if (!list) return;
-  if (count) count.textContent = String(ui.sessions.length);
+  const scoped = ui.sessions.filter((s) => (s.projectId ?? null) === ui.activeProjectId);
+  if (count) count.textContent = String(scoped.length);
 
-  if (!ui.sessions.length) {
+  if (!scoped.length) {
     list.innerHTML = '<div class="sd-session-empty">Belum ada sesi</div>';
     return;
   }
 
   list.innerHTML = '';
-  for (const s of ui.sessions) {
+  for (const s of scoped) {
     const row = document.createElement('div');
     row.className = `sd-session${s.id === ui.activeSessionId ? ' active' : ''}`;
     row.title = `${s.title}\n${s.model} · ${new Date(s.updatedAt).toLocaleString('id-ID')}\nKlik untuk buka · klik ganda untuk rename`;
@@ -365,7 +587,7 @@ function renderEmpty(): void {
         <button type="button" data-prompt="Jelaskan cara kerja RAG untuk chatbot, lengkap dengan sumber yang jelas">📚 Jelaskan konsep</button>
       </div>
       <div class="sd-empty-note">
-        mode: <b>${ui.workspaceMode === 'dev' ? 'Dev — tools aktif' : 'Plan — tanya-jawab saja'}</b> ·
+        mode: <b>${escapeHtml(modeFor(ui.workspaceMode).label)}${ui.toolsEnabled && modeUsesTools(ui.workspaceMode) ? ' — tools aktif' : ''}</b> ·
         model: <b>${escapeHtml(ui.config.model || '—')}</b> ·
         workspace: <b>${escapeHtml(ws)}</b>
       </div>
@@ -495,8 +717,12 @@ function renderMessages(): void {
 function renderToolChips(): void {
   const bar = el.sdToolsBar as HTMLElement | undefined;
   if (!bar) return;
-  if (ui.workspaceMode === 'plan') {
-    bar.innerHTML = `<span class="sd-chip" style="cursor:default;opacity:.7">Mode Plan — tools dinonaktifkan</span>`;
+  if (!ui.toolsEnabled || !modeUsesTools(ui.workspaceMode)) {
+    bar.innerHTML = `<span class="sd-chip" style="cursor:default;opacity:.7">${
+      ui.toolsEnabled
+        ? `Mode ${modeFor(ui.workspaceMode).label} — tools tidak dipakai di mode ini`
+        : 'Tools lokal dimatikan di Pengaturan'
+    }</span>`;
     return;
   }
   bar.innerHTML = ui.tools
@@ -537,6 +763,10 @@ async function refresh(fromMain = true): Promise<void> {
     ui.activeSessionId = state.activeSessionId;
     ui.workspaceRoot = state.workspaceRoot;
     ui.workspaceMode = state.workspaceMode;
+    ui.toolsEnabled = state.toolsEnabled !== false;
+    ui.onboarded = state.onboarded === true;
+    ui.projects = state.projects ?? [];
+    ui.activeProjectId = state.activeProjectId ?? null;
     ui.keyProtection = state.keyProtection ?? ui.keyProtection;
     if (state.tools?.length) ui.tools = state.tools;
   }
@@ -545,6 +775,7 @@ async function refresh(fromMain = true): Promise<void> {
   renderWorkspace();
   renderToolChips();
   renderMessages();
+  renderProjects();
 }
 
 async function send(text: string): Promise<void> {
@@ -1251,8 +1482,27 @@ function applyThemeButtons(): void {
 function syncModeButtons(): void {
   const dev = el.sdModeDev as HTMLButtonElement | undefined;
   const plan = el.sdModePlan as HTMLButtonElement | undefined;
-  if (dev) dev.classList.toggle('is-on', ui.workspaceMode === 'dev');
-  if (plan) plan.classList.toggle('is-on', ui.workspaceMode === 'plan');
+  if (dev) dev.classList.toggle('is-on', ui.workspaceMode === 'code');
+  if (plan) plan.classList.toggle('is-on', ui.workspaceMode === 'general');
+}
+
+async function pickMode(next: WorkspaceMode): Promise<void> {
+  if (next === ui.workspaceMode) return;
+  ui.workspaceMode = await bridge.setMode(next);
+  syncModeButtons();
+  renderHeader();
+  renderToolChips();
+  renderMessages();
+}
+
+async function finishWelcome(thenOpenSettings: boolean): Promise<void> {
+  ui.onboarded = true;
+  await bridge.setOnboarded(true);
+  el.screenWelcome.classList.remove('open');
+  el.screenWelcome.hidden = true;
+  showScreen('console');
+  if (thenOpenSettings) await openSettings();
+  else (el.sdInput as HTMLTextAreaElement).focus();
 }
 
 async function openSettings(): Promise<void> {
@@ -1323,7 +1573,7 @@ function blankUpdateState(): UpdatePayload {
 function updateToolPop(): void {
   const ta = el.sdInput as HTMLTextAreaElement;
   const pop = el.sdToolPop as HTMLElement;
-  if (ui.workspaceMode === 'plan') {
+  if (!ui.toolsEnabled || !modeUsesTools(ui.workspaceMode)) {
     pop.classList.remove('open');
     return;
   }
@@ -1524,13 +1774,24 @@ function wireEvents(): void {
     (el.sdSidebar as HTMLElement).classList.toggle('hidden');
   });
 
-  (el.sdModeToggle as HTMLButtonElement).addEventListener('click', () => {
-    const next: WorkspaceMode = ui.workspaceMode === 'dev' ? 'plan' : 'dev';
-    ui.workspaceMode = next;
-    void bridge.setMode(next);
-    renderHeader();
-    renderToolChips();
-    renderMessages();
+  (el.sdModeToggle as HTMLButtonElement).addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleModePicker();
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-screen]').forEach((btn) => {
+    btn.addEventListener('click', () => showScreen(btn.dataset.screen as ScreenId));
+  });
+
+  (el.sdProjectNew as HTMLButtonElement).addEventListener('click', () => editProject(''));
+  (el.sdProjectAll as HTMLButtonElement).addEventListener('click', () => void openProject(null));
+
+  // Welcome: the one screen that matters when there is no key yet.
+  (el.sdWelcomeStart as HTMLButtonElement)?.addEventListener('click', () => {
+    void finishWelcome(true);
+  });
+  (el.sdWelcomeSkip as HTMLButtonElement)?.addEventListener('click', () => {
+    void finishWelcome(false);
   });
 
   (el.sdWorkspaceBtn as HTMLButtonElement).addEventListener('click', () => void pickWorkspace());
@@ -1636,22 +1897,8 @@ function wireEvents(): void {
     void bridge.setTheme('dark');
     applyThemeButtons();
   });
-  (el.sdModeDev as HTMLButtonElement).addEventListener('click', () => {
-    ui.workspaceMode = 'dev';
-    void bridge.setMode('dev');
-    syncModeButtons();
-    renderHeader();
-    renderToolChips();
-    renderMessages();
-  });
-  (el.sdModePlan as HTMLButtonElement).addEventListener('click', () => {
-    ui.workspaceMode = 'plan';
-    void bridge.setMode('plan');
-    syncModeButtons();
-    renderHeader();
-    renderToolChips();
-    renderMessages();
-  });
+  (el.sdModeDev as HTMLButtonElement).addEventListener('click', () => void pickMode('code'));
+  (el.sdModePlan as HTMLButtonElement).addEventListener('click', () => void pickMode('general'));
 
   document.addEventListener('keydown', (e) => {
     // Escape closes only when the dialog is idle: dismissing mid-request would
@@ -1748,10 +1995,19 @@ async function init(): Promise<void> {
     ui.presets = [];
   }
 
+  renderDocs();
+  showScreen('console');
   await refresh();
   autosize();
-  (el.sdInput as HTMLTextAreaElement).focus();
 
+  if (!ui.onboarded) {
+    el.screenWelcome.hidden = false;
+    el.screenWelcome.classList.add('open');
+    paintMarks(el.screenWelcome);
+    return;
+  }
+
+  (el.sdInput as HTMLTextAreaElement).focus();
   if (!ui.config.apiKey && !isLocalProvider(ui.config.provider)) {
     toast('API key belum diatur — buka Pengaturan', 'bad');
   }

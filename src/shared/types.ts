@@ -27,7 +27,11 @@ export type ProviderId =
   | 'ollama'
   | 'custom';
 
-export type WorkspaceMode = 'dev' | 'plan';
+/**
+ * What a workspace is for. Matches the Android client's seven modes; the
+ * instruction each one appends lives in `shared/modes.ts`.
+ */
+export type WorkspaceMode = 'general' | 'code' | 'media' | 'alert' | 'writing' | 'research' | 'music';
 
 /** One catalogue entry. `custom` carries a user-typed base URL instead. */
 export interface ProviderPreset {
@@ -149,6 +153,8 @@ export interface Session {
   id: string;
   title: string;
   model: string;
+  /** The project this session belongs to, or null for the ungrouped workspace. */
+  projectId?: string | null;
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;
@@ -163,6 +169,27 @@ export interface PersistedState {
   workspaceRoot: string | null;
   theme: 'light' | 'dark';
   workspaceMode: WorkspaceMode;
+  /** A project groups sessions; null is the ungrouped workspace. */
+  activeProjectId: string | null;
+  projects: Project[];
+  /** First run shows the welcome screen until this is dismissed. */
+  onboarded: boolean;
+  /** The master switch for local tools, independent of which mode is active. */
+  toolsEnabled: boolean;
+  /** Speak replies aloud through the OS voice engine. */
+  speakReplies: boolean;
+  /** Interface language. */
+  language: 'id' | 'en';
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  language: string;
+  status: 'idea' | 'active' | 'paused' | 'done';
+  createdAt: number;
+  updatedAt: number;
 }
 
 export type RunStatus =

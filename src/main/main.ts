@@ -265,6 +265,11 @@ async function runSmokeTest(get: () => BrowserWindow | null): Promise<void> {
         out.marks = [...document.querySelectorAll('.sd-mark svg')].map((s) => Math.round(s.getBoundingClientRect().width)).filter((w) => w > 0).length;
         out.markGradients = document.querySelectorAll('[id^="sdLogoGradient"]').length;
         out.themeBtn = !!$('sdThemeBtn').querySelector('use');
+        out.navButtons = document.querySelectorAll('[data-screen]').length;
+        out.screensRendered = [...document.querySelectorAll('[data-screen-body]')].map(n => !!n.querySelector('*')).filter(Boolean).length;
+        out.modeLabel = ($('sdModeToggle') || {}).textContent || '';
+        out.docsSections = $('screenDocs').querySelectorAll('.sd-doc').length;
+        out.projectList = !!$('sdProjectList');
         out.hintHtml = $('sdWsHint').textContent;
         // toggle theme + mode round trip
         out.themeBefore = document.body.className;
@@ -301,6 +306,11 @@ async function runSmokeTest(get: () => BrowserWindow | null): Promise<void> {
     if ((p.marks as number) < 2) fail(`app mark did not render (${p.marks})`);
     if ((p.markGradients as number) < 2) fail(`app mark gradient missing (${p.markGradients})`);
     if (!p.themeBtn) fail('theme button empty');
+    if ((p.navButtons as number) !== 3) fail(`screen nav incomplete (${p.navButtons} buttons)`);
+    if ((p.screensRendered as number) < 2) fail(`screens did not render (${p.screensRendered})`);
+    if ((p.docsSections as number) < 6) fail(`docs screen empty (${p.docsSections} sections)`);
+    if (!p.projectList) fail('projects screen missing');
+    if (!String(p.modeLabel ?? '').trim()) fail('workspace mode label empty');
     if (state?.config?.model === undefined) fail('config.model missing');
     const geom = p.geom as Record<string, { w: number; h: number } | null>;
     const thin = (name: string, minW: number, minH: number): void => {

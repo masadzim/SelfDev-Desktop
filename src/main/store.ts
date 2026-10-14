@@ -13,11 +13,13 @@ import {
   resolve,
   WIRE_APIS
 } from '../shared/providers';
-import type { AppConfig, PersistedState, ProviderId, Session, WireApi, WorkspaceMode } from '../shared/types';
+import type { AppConfig, PersistedState, Project, ProviderId, Session, WireApi, WorkspaceMode } from '../shared/types';
+import { DEFAULT_MODE, isValidWorkspaceMode } from '../shared/modes';
 import { open as unseal, seal } from './keyVault';
 
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
 const MAX_SESSIONS = 200;
+const MAX_PROJECTS = 100;
 
 function defaultState(): PersistedState {
   return {
@@ -27,7 +29,13 @@ function defaultState(): PersistedState {
     activeSessionId: null,
     workspaceRoot: null,
     theme: 'light',
-    workspaceMode: 'dev'
+    workspaceMode: DEFAULT_MODE,
+    activeProjectId: null,
+    projects: [],
+    onboarded: false,
+    toolsEnabled: true,
+    speakReplies: false,
+    language: 'id'
   };
 }
 
@@ -106,7 +114,33 @@ export class Store {
       activeSessionId: typeof raw.activeSessionId === 'string' ? raw.activeSessionId : null,
       workspaceRoot: typeof raw.workspaceRoot === 'string' ? raw.workspaceRoot : null,
       theme: raw.theme === 'dark' ? 'dark' : 'light',
-      workspaceMode: raw.workspaceMode === 'plan' ? 'plan' : 'dev'
+      workspaceMode: isValidWorkspaceMode(raw.workspaceMode) ? raw.workspaceMode : DEFAULT_MODE,
+      activeProjectId: typeof raw.activeProjectId === 'string' ? raw.activeProjectId : null,
+      projects: (Array.isArray(raw.projects) ? raw.projects : [])
+        .filter((p) => this.isProject(p))
+        .slice(0, MAX_PROJECTS)
+        .map((p) => this.normalizeProject(p)),
+      onboarded: raw.onboarded === true,
+      toolsEnabled: raw.toolsEnabled !== false,
+      speakReplies: raw.speakReplies === true,
+      language: raw.language === 'en' ? 'en' : 'id'
+    };
+  }
+
+  private isProject(p: unknown): p is Project {
+    return !!p && typeof p === 'object' && typeof (p as Project).id === 'string' && typeof (p as Project).name === 'string';
+  }
+
+  private normalizeProject(p: Project): Project {
+    const status = ['idea', 'active', 'paused', 'done'].includes(p.status) ? p.status : 'active';
+    return {
+      id: p.id,
+      name: p.name.trim().slice(0, 80) || 'Proyek baru',
+      description: typeof p.description === 'string' ? p.description.slice(0, 400) : '',
+      language: typeof p.language === 'string' ? p.language.slice(0, 40) : '',
+      status: status as Project['status'],
+      createdAt: typeof p.createdAt === 'number' ? p.createdAt : Date.now(),
+      updatedAt: typeof p.updatedAt === 'number' ? p.updatedAt : Date.now()
     };
   }
 
@@ -128,6 +162,7 @@ export class Store {
       id: s.id,
       title: (typeof s.title === 'string' && s.title.trim()) || 'Percakapan baru',
       model: typeof s.model === 'string' && s.model ? s.model : defaultConfig().model,
+      projectId: typeof s.projectId === 'string' ? s.projectId : null,
       messages,
       createdAt: typeof s.createdAt === 'number' ? s.createdAt : Date.now(),
       updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : Date.now()
@@ -208,9 +243,89 @@ export class Store {
   }
 
   setMode(mode: WorkspaceMode): WorkspaceMode {
-    this.state.workspaceMode = mode;
+    this.state.workspaceMode = isValidWorkspaceMode(mode) ? mode : DEFAULT_MODE;
     this.scheduleWrite();
-    return mode;
+    return this.state.workspaceMode;
+  }
+
+  getToolsEnabled(): boolean {
+    return this.state.toolsEnabled;
+  }
+
+  setToolsEnabled(on: boolean): boolean {
+    this.state.toolsEnabled = Boolean(on);
+    this.scheduleWrite();
+    return this.state.toolsEnabled;
+  }
+
+  getSpeakReplies(): boolean {
+    return this.state.speakReplies;
+  }
+
+  setSpeakReplies(on: boolean): boolean {
+    this.state.speakReplies = Boolean(on);
+    this.scheduleWrite();
+    return this.state.speakReplies;
+  }
+
+  getLanguage(): 'id' | 'en' {
+    return this.state.language;
+  }
+
+  setLanguage(lang: 'id' | 'en'): 'id' | 'en' {
+    this.state.language = lang === 'en' ? 'en' : 'id';
+    this.scheduleWrite();
+    return this.state.language;
+  }
+
+  setOnboarded(done: boolean): boolean {
+    this.state.onboarded = done;
+    this.scheduleWrite();
+    return done;
+  }
+
+  // ---------- projects ----------
+
+  listProjects(): Project[] {
+    return this.state.projects.map((p) => ({ ...p }));
+  }
+
+  getProject(id: string): Project | undefined {
+    return this.state.projects.find((p) => p.id === id);
+  }
+
+  upsertProject(input: Partial<Project> & { name: string }): Project {
+    const now = Date.now();
+    const existing = input.id ? this.getProject(input.id) : undefined;
+    const project: Project = this.normalizeProject({
+      id: existing?.id ?? newId('p'),
+      name: input.name,
+      description: input.description ?? existing?.description ?? '',
+      language: input.language ?? existing?.language ?? '',
+      status: input.status ?? existing?.status ?? 'active',
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    });
+    if (existing) {
+      Object.assign(existing, project);
+    } else {
+      this.state.projects.unshift(project);
+      if (this.state.projects.length > MAX_PROJECTS) this.state.projects.length = MAX_PROJECTS;
+    }
+    this.scheduleWrite();
+    return project;
+  }
+
+  deleteProject(id: string): void {
+    this.state.projects = this.state.projects.filter((p) => p.id !== id);
+    if (this.state.activeProjectId === id) this.state.activeProjectId = null;
+    this.scheduleWrite();
+  }
+
+  setActiveProject(id: string | null): string | null {
+    this.state.activeProjectId = id && this.getProject(id) ? id : null;
+    this.scheduleWrite();
+    return this.state.activeProjectId;
   }
 
   getWorkspaceRoot(): string | null {
@@ -233,12 +348,18 @@ export class Store {
     return this.state.sessions.find((s) => s.id === id);
   }
 
-  createSession(activate = true): Session {
+  /** Sessions belonging to one project, newest first. Ungrouped is the empty id. */
+  sessionsForProject(projectId: string | null): Session[] {
+    return this.state.sessions.filter((s) => (s.projectId ?? null) === projectId);
+  }
+
+  createSession(activate = true, projectId?: string | null): Session {
     const now = Date.now();
     const session: Session = {
       id: newId('s'),
       title: 'Percakapan baru',
       model: this.state.config.model,
+      projectId: projectId !== undefined ? projectId : this.state.activeProjectId,
       messages: [],
       createdAt: now,
       updatedAt: now

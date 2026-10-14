@@ -48,6 +48,10 @@ writeFileSync(
     activeSessionId: null,
     workspaceRoot: ws,
     theme: process.env.SELFDEV_SMOKE_THEME === 'light' ? 'light' : 'dark',
+    // The welcome screen only shows on a genuinely first run; by default the
+    // smoke boots straight into the console so the main UI is what gets checked.
+    onboarded: process.env.SELFDEV_SMOKE_WELCOME !== '1',
+    toolsEnabled: true,
     createdAt: Date.now()
   })
 );

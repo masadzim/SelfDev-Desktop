@@ -2,6 +2,7 @@ import { Store } from './store';
 import { executeTool, toolSchemas } from './tools';
 import { LlmError, maxTokensCeiling, streamChat } from './llm/chat';
 import { DEFAULT_SYSTEM, repairModelFor } from '../shared/providers';
+import { modeFor, modeUsesTools, promptFor } from '../shared/modes';
 import type { ChatMessage, RunEvent, RunStatus, ToolCallRecord, ToolResultRecord } from '../shared/types';
 
 const MAX_ITERATIONS = 12;
@@ -48,7 +49,12 @@ export async function runAgent(ctx: RunContext, sessionId: string, userText: str
   const { store, emit } = ctx;
   const cfg = store.getConfig();
   const workspaceRoot = store.getWorkspaceRoot();
-  const useTools = store.getMode() === 'dev';
+  const mode = store.getMode();
+  // A mode decides which tools the agent may reach for; the prompt it appends
+  // goes out with the request, so the model is told which way it is meant to work.
+  const useTools = store.getToolsEnabled() && modeUsesTools(mode);
+  const system = promptFor(cfg.system, mode);
+  void modeFor(mode);
 
   const session = store.getSession(sessionId);
   if (!session) {
@@ -96,7 +102,7 @@ export async function runAgent(ctx: RunContext, sessionId: string, userText: str
       for (;;) {
         try {
           result = await streamChat(
-            { ...cfg, maxTokens: tokenBudget },
+            { ...cfg, maxTokens: tokenBudget, system },
             apiHistory,
             schemas,
             {

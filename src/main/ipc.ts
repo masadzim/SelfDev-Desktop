@@ -6,7 +6,7 @@ import { runAgent, MISSING_KEY_MESSAGE } from './agent';
 import { LlmError, listModelCatalog, testConnection as probeConnection } from './llm/chat';
 import { toolMetas, walkWorkspaceFiles } from './tools';
 import { PRESETS, labelFor, presetFor, repairModelFor } from '../shared/providers';
-import type { AppConfig, ModelEntry, ProviderId, RunEvent, WireApi, WorkspaceMode } from '../shared/types';
+import type { AppConfig, ModelEntry, Project, ProviderId, RunEvent, WireApi, WorkspaceMode } from '../shared/types';
 import { windowBg } from '../shared/theme';
 import { vaultMode } from './keyVault';
 import { getUpdaterApi, type UpdateState } from './updater';
@@ -129,7 +129,21 @@ export function registerIpc({ store, getWindow }: IpcDeps): () => void {
     }
   );
 
-  handle('setMode', (mode: WorkspaceMode) => store.setMode(mode === 'plan' ? 'plan' : 'dev'));
+  handle('setMode', (mode: WorkspaceMode) => store.setMode(mode));
+  handle('setOnboarded', (done: boolean) => store.setOnboarded(Boolean(done)));
+  handle('setToolsEnabled', (on: boolean) => store.setToolsEnabled(on));
+  handle('setSpeakReplies', (on: boolean) => store.setSpeakReplies(on));
+  handle('setLanguage', (lang: 'id' | 'en') => store.setLanguage(lang));
+
+  // -------------------------------------------------------- projects
+  handle('listProjects', () => store.listProjects());
+  handle('saveProject', (input: Partial<Project> & { name: string }) => store.upsertProject(input));
+  handle('deleteProject', (id: string) => {
+    store.deleteProject(id);
+    return store.listProjects();
+  });
+  handle('setActiveProject', (id: string | null) => store.setActiveProject(id));
+  handle('sessionsForProject', (id: string | null) => store.sessionsForProject(id));
   handle('setTheme', (theme: 'light' | 'dark') => {
     const applied = store.setTheme(theme === 'dark' ? 'dark' : 'light');
     getWindow()?.setBackgroundColor(windowBg(applied));
