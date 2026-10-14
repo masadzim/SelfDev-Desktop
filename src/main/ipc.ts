@@ -4,6 +4,8 @@ import { promises as fs } from 'node:fs';
 import { Store } from './store';
 import { runAgent, MISSING_KEY_MESSAGE } from './agent';
 import { LlmError, listModelCatalog, testConnection as probeConnection } from './llm/chat';
+import { extensionFor, generateImages, imageModels, imageRequestFor } from './llm/imagegen';
+import { buildPayload, readBackup, writeBackup } from './backup';
 import { toolMetas, walkWorkspaceFiles } from './tools';
 import { PRESETS, labelFor, presetFor, repairModelFor } from '../shared/providers';
 import type { AppConfig, ModelEntry, Project, ProviderId, RunEvent, WireApi, WorkspaceMode } from '../shared/types';
@@ -224,6 +226,91 @@ export function registerIpc({ store, getWindow }: IpcDeps): () => void {
   handle('clearSessions', () => {
     store.clearSessions();
     return store.listSessions();
+  });
+
+  // -------------------------------------------------------------- backup
+  handle('backupExport', async (opts: { passphrase: string; includeApiKey: boolean; defaultPath: string }) => {
+    if (!opts.passphrase) throw new Error('Passphrase kosong.');
+    const win = getWindow();
+    if (!win) throw new Error('Jendela tidak tersedia.');
+    const res = await dialog.showSaveDialog(win, {
+      title: 'Simpan backup SelfDev',
+      defaultPath: opts.defaultPath,
+      filters: [{ name: 'SelfDev backup', extensions: ['selfdev'] }]
+    });
+    if (res.canceled || !res.filePath) return { ok: false, cancelled: true };
+    const payload = buildPayload({
+      settings: store.backupSettings(),
+      sessions: store.listSessions(),
+      projects: store.listProjects(),
+      includeApiKey: Boolean(opts.includeApiKey)
+    });
+    await writeBackup(res.filePath, payload, opts.passphrase);
+    return { ok: true, cancelled: false, path: res.filePath, counts: payload.counts, withKey: opts.includeApiKey };
+  });
+
+  handle('backupImport', async (opts: { passphrase: string }) => {
+    const win = getWindow();
+    if (!win) throw new Error('Jendela tidak tersedia.');
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Pilih backup SelfDev',
+      properties: ['openFile'],
+      filters: [{ name: 'SelfDev backup', extensions: ['selfdev'] }]
+    });
+    if (res.canceled || !res.filePaths[0]) return { ok: false, cancelled: true };
+    const payload = await readBackup(res.filePaths[0], opts.passphrase ?? '');
+    store.restoreFrom(payload.settings, payload.sessions, payload.projects);
+    return {
+      ok: true,
+      cancelled: false,
+      path: res.filePaths[0],
+      counts: payload.counts,
+      exportedAt: payload.exportedAt
+    };
+  });
+
+  // -------------------------------------------------------- image gen
+  handle('imageModels', (providerId: string, customWireApi: WireApi = 'OPENAI_CHAT') =>
+    imageModels(providerId, [], customWireApi)
+  );
+
+  handle(
+    'imageGenerate',
+    async (params: {
+      provider: ProviderId;
+      customBaseUrl: string;
+      customWireApi?: WireApi;
+      apiKey: string;
+      model: string;
+      prompt: string;
+      size: 'SQUARE' | 'LANDSCAPE' | 'PORTRAIT';
+      count: number;
+    }) => {
+      if (!params.prompt.trim()) throw new Error('Prompt gambar masih kosong.');
+      const saved = store.getConfig();
+      const spec = imageRequestFor(
+        params.provider,
+        params.customBaseUrl ?? '',
+        params.customWireApi ?? saved.customWireApi,
+        params.apiKey || saved.apiKey,
+        params.model,
+        { prompt: params.prompt, size: params.size, count: params.count }
+      );
+      return generateImages(spec, params.model, new AbortController().signal);
+    }
+  );
+
+  handle('imageSave', async (params: { data: string; mimeType: string; model: string }) => {
+    const win = getWindow();
+    if (!win) throw new Error('Jendela tidak tersedia.');
+    const res = await dialog.showSaveDialog(win, {
+      title: 'Simpan gambar',
+      defaultPath: `image-${params.model.replace(/[^a-z0-9._-]/gi, '-')}-${Date.now()}.${extensionFor(params.mimeType)}`,
+      filters: [{ name: params.mimeType.replace('image/', '').toUpperCase(), extensions: [extensionFor(params.mimeType)] }]
+    });
+    if (res.canceled || !res.filePath) return { ok: false, cancelled: true };
+    await fs.writeFile(res.filePath, Buffer.from(params.data, 'base64'));
+    return { ok: true, cancelled: false, path: res.filePath };
   });
 
   // ----------------------------------------------------------- misc

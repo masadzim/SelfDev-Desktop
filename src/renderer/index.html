@@ -229,6 +229,7 @@
       <nav class="sd-nav" aria-label="Layar">
         <button class="sd-nav-btn is-on" type="button" data-screen="console" title="Console"><svg class="ic ic-sm"><use href="#i-terminal" /></svg></button>
         <button class="sd-nav-btn" type="button" data-screen="projects" title="Proyek"><svg class="ic ic-sm"><use href="#i-folder" /></svg></button>
+        <button class="sd-nav-btn" type="button" data-screen="images" title="Buat gambar"><svg class="ic ic-sm"><use href="#i-sparkle" /></svg></button>
         <button class="sd-nav-btn" type="button" data-screen="docs" title="Dokumentasi"><svg class="ic ic-sm"><use href="#i-book" /></svg></button>
       </nav>
       <div class="sd-header-tools">
@@ -288,6 +289,36 @@
         </div>
       </div>
       <div id="sdProjectList" class="sd-project-list"></div>
+    </section>
+
+    <!-- ================================================================ images -->
+    <section id="screenImages" class="sd-screen sd-page" data-screen-body="images" hidden>
+      <div class="sd-page-head">
+        <h2>Buat gambar</h2>
+        <p>Endpoint image OpenAI dan endpoint Imagen / Gemini. Hasilnya disimpan ke disk dari tombol Simpan.</p>
+      </div>
+
+      <div class="sd-image-form">
+        <div class="sd-field">
+          <label for="sdImgModel">Model gambar</label>
+          <select id="sdImgModel"></select>
+          <small class="sd-field-note" id="sdImgModelNote">—</small>
+        </div>
+        <div class="sd-field">
+          <label for="sdImgPrompt">Prompt</label>
+          <textarea id="sdImgPrompt" rows="3" spellcheck="false" placeholder="Ilustrasi teknis blog tentang developer tools, gaya flat, palet biru"></textarea>
+        </div>
+        <div class="sd-field">
+          <label>Ukuran</label>
+          <div id="sdImgSizes" class="sd-pills"></div>
+        </div>
+        <div class="sd-btn-row">
+          <button id="sdImgRun" class="sd-btn sd-btn-primary sd-btn-sm" type="button"><svg class="ic ic-sm"><use href="#i-sparkle" /></svg> Buat gambar</button>
+          <button id="sdImgCancel" class="sd-btn sd-btn-outline sd-btn-sm" type="button" hidden>Batalkan</button>
+          <span id="sdImgStatus" class="sd-badge" hidden></span>
+        </div>
+      </div>
+      <div id="sdImgResults" class="sd-image-grid"></div>
     </section>
 
     <!-- ================================================================== docs -->
@@ -477,6 +508,38 @@
             <button id="sdModePlan" class="sd-pill" type="button"><svg class="ic ic-sm"><use href="#i-book" /></svg> Plan</button>
           </div>
           <small class="sd-field-note">Mode Dev mengaktifkan tools lokal; Plan hanya tanya-jawab.</small>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------- backup -->
+      <section class="sd-sec" data-sec="backup">
+        <button class="sd-sec-head" type="button" aria-expanded="false">
+          <span class="sd-sec-icon"><svg class="ic"><use href="#i-cloud" /></svg></span>
+          <span class="sd-sec-text">
+            <span class="sd-sec-title">Backup</span>
+            <span class="sd-sec-sub">ekspor &amp; restore pengaturan, sesi, proyek</span>
+          </span>
+          <span class="sd-sec-chev"><svg class="ic"><use href="#i-chevron" /></svg></span>
+        </button>
+        <div class="sd-sec-body">
+          <div class="sd-field">
+            <label for="sdBackupPass">Passphrase</label>
+            <div class="sd-input-wrap">
+              <input id="sdBackupPass" type="password" placeholder="Dipakai untuk mengenkripsi berkas" autocomplete="off" spellcheck="false" />
+              <button id="sdBackupToggle" class="sd-input-action" type="button" aria-label="Tampilkan passphrase"><svg class="ic ic-sm"><use href="#i-eye" /></svg></button>
+            </div>
+            <small class="sd-field-note">Backup dienkripsi AES-256-GCM. Tanpa passphrase yang benar, isinya tidak bisa dibaca — dan tidak ada jalan memulihkannya.</small>
+          </div>
+          <label class="sd-check">
+            <input id="sdBackupKey" type="checkbox" />
+            <span>Sertakan API key di backup</span>
+          </label>
+          <small class="sd-field-note">Default-nya tidak: backup yang dibagikan tidak ikut membawa kredensial.</small>
+          <div class="sd-btn-row" style="margin-top:0.6rem">
+            <button id="sdBackupExport" class="sd-btn sd-btn-outline sd-btn-sm" type="button"><svg class="ic ic-sm"><use href="#i-download" /></svg> Ekspor</button>
+            <button id="sdBackupImport" class="sd-btn sd-btn-outline sd-btn-sm" type="button"><svg class="ic ic-sm"><use href="#i-folder-open" /></svg> Restore</button>
+          </div>
+          <div id="sdBackupResult" class="sd-test-result" role="status" aria-live="polite"></div>
         </div>
       </section>
 

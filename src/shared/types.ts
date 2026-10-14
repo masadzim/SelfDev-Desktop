@@ -182,6 +182,43 @@ export interface PersistedState {
   language: 'id' | 'en';
 }
 
+/** The three shapes a user actually asks for. No image API takes free dimensions. */
+export type ImageSize = 'SQUARE' | 'LANDSCAPE' | 'PORTRAIT';
+
+/** Which of the two Google endpoints a model is reached through. */
+export type ImageGenKind = 'OPENAI_IMAGE' | 'GEMINI_IMAGE' | 'IMAGEN';
+
+export interface ImageGenModel {
+  providerId: ProviderId;
+  model: string;
+  kind: ImageGenKind;
+  label: string;
+}
+
+export interface ImageRequest {
+  prompt: string;
+  size: ImageSize;
+  count: number;
+}
+
+export interface GeneratedImage {
+  /** Base64, no data: prefix. */
+  data: string;
+  mimeType: string;
+  model: string;
+  /** What the model says it drew; several of them rewrite the prompt. */
+  revisedPrompt: string | null;
+}
+
+export interface BackupSettings {
+  config: AppConfig;
+  workspaceMode: WorkspaceMode;
+  toolsEnabled: boolean;
+  speakReplies: boolean;
+  language: 'id' | 'en';
+  onboarded: boolean;
+}
+
 export interface Project {
   id: string;
   name: string;

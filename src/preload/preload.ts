@@ -18,6 +18,23 @@ const api = {
   getProviders: () => invoke('getProviders'),
 
   setMode: (mode: string) => invoke('setMode', mode),
+  setToolsEnabled: (on: boolean) => invoke('setToolsEnabled', on),
+  setSpeakReplies: (on: boolean) => invoke('setSpeakReplies', on),
+  setLanguage: (lang: string) => invoke('setLanguage', lang),
+  setOnboarded: (done: boolean) => invoke('setOnboarded', done),
+
+  listProjects: () => invoke('listProjects'),
+  saveProject: (input: unknown) => invoke('saveProject', input),
+  deleteProject: (id: string) => invoke('deleteProject', id),
+  setActiveProject: (id: string | null) => invoke('setActiveProject', id),
+  sessionsForProject: (id: string | null) => invoke('sessionsForProject', id),
+
+  backupExport: (opts: unknown) => invoke('backupExport', opts),
+  backupImport: (opts: unknown) => invoke('backupImport', opts),
+
+  imageModels: (providerId: string) => invoke('imageModels', providerId),
+  imageGenerate: (params: unknown) => invoke('imageGenerate', params),
+  imageSave: (params: unknown) => invoke('imageSave', params),
   setTheme: (theme: string) => invoke('setTheme', theme),
 
   pickWorkspace: () => invoke('pickWorkspace'),

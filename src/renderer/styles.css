@@ -17,6 +17,12 @@
   box-sizing: border-box;
 }
 
+/* A component's own `display` must never resurrect a [hidden] element: the UA
+   rule for [hidden] loses to any class selector, which is a silent trap. */
+[hidden] {
+  display: none !important;
+}
+
 /* ------------------------------------------------------------------ tokens */
 :root {
   color-scheme: light;
@@ -1730,3 +1736,56 @@ body.dark .sd-toolpop button .ic { color: var(--accent); }
 .sd-mode-row.is-on { background: color-mix(in srgb, var(--agent) 9%, transparent); }
 .sd-mode-row b { font-size: 0.82rem; }
 .sd-mode-row span { font-size: 0.7rem; color: var(--text-muted); }
+
+/* ---------------------------------------------------------------- images */
+.sd-image-form {
+  display: grid;
+  gap: 0.6rem;
+  max-width: 640px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 0.9rem;
+}
+.sd-image-form .sd-field { margin-bottom: 0; }
+.sd-image-form select {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-alt);
+  border-radius: var(--r-sm);
+  padding: 0.5rem 0.65rem;
+  font-family: inherit;
+  font-size: 0.84rem;
+  color: var(--text);
+  outline: none;
+}
+.sd-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.7rem;
+  max-width: 980px;
+}
+.sd-image-card {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.sd-image-card img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; background: var(--sunken); }
+.sd-image-card-body { padding: 0.55rem 0.6rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.sd-image-card-model { font-size: 0.72rem; font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-image-card-revised { font-size: 0.68rem; color: var(--text-muted); line-height: 1.4; }
+.sd-image-error {
+  grid-column: 1 / -1;
+  background: var(--bad-bg);
+  color: var(--bad-text);
+  border-radius: var(--r-sm);
+  padding: 0.6rem 0.7rem;
+  font-size: 0.78rem;
+}
+
+/* ---------------------------------------------------------------- backup */
+.sd-check { display: flex; align-items: center; gap: 0.45rem; font-size: 0.78rem; color: var(--text); cursor: pointer; }
+.sd-check input { width: 15px; height: 15px; accent-color: var(--agent); cursor: pointer; }

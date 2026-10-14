@@ -55,7 +55,26 @@ import {
   streamUrl
 } from '../src/shared/providers';
 import type { AppConfig, ChatMessage, ProviderId, RunEvent, Session, WireApi, WorkspaceMode } from '../src/shared/types';
-import { MODES, modeUsesTools, promptFor } from '../src/shared/modes';
+import { DEFAULT_MODE, MODES, modeFor, modeUsesTools, promptFor } from '../src/shared/modes';
+import {
+  IMAGE_SIZES,
+  allImageModels,
+  buildImagenBody,
+  buildOpenAiBody,
+  canGenerate,
+  extensionFor,
+  findImageModel,
+  imageModels,
+  imageProviderIds,
+  imageUrl,
+  looksLikeImageModel,
+  parseGemini,
+  parseImagen,
+  parseOpenAi
+} from '../src/shared/imagegen';
+import { EXTENSION, FORMAT, VERSION, buildPayload, parsePayload, suggestedFilename } from '../src/shared/backupFormat';
+import { sealPayload, openPayload } from '../src/main/backup';
+import { DOCS } from '../src/shared/docs';
 
 let passed = 0;
 let failed = 0;
@@ -73,6 +92,15 @@ function check(name: string, cond: boolean, detail = ''): void {
 
 function eq(name: string, actual: unknown, expected: unknown): void {
   check(name, Object.is(actual, expected), `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+}
+
+/** Array comparison by value; Object.is never holds for two distinct arrays. */
+function eqList(name: string, actual: unknown, expected: unknown): void {
+  check(
+    name,
+    JSON.stringify(actual) === JSON.stringify(expected),
+    `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+  );
 }
 
 function section(title: string): void {
@@ -1009,6 +1037,163 @@ section('empty completion handling');
   } finally {
     globalThis.fetch = original;
   }
+}
+
+// ------------------------------------------------------------------- modes
+
+section('workspace modes');
+{
+  eq('seven modes', MODES.length, 7);
+  eq('code is a mode', MODES.some((m) => m.id === 'code'), true);
+  eq('every mode has a prompt', MODES.every((m) => m.prompt.trim().length > 40), true);
+  eq('every mode has a label', MODES.every((m) => m.label.trim().length > 0), true);
+  eq('tools used in code', modeUsesTools('code'), true);
+  eq('tools used in research', modeUsesTools('research'), true);
+  eq('tools not used in music', modeUsesTools('music'), false);
+
+  const withBase = promptFor('BASE', 'research');
+  check('base prompt is kept', withBase.startsWith('BASE'), withBase);
+  check('mode instructions are appended', withBase.includes('peneliti'), withBase);
+  eq('an empty base still yields instructions', promptFor('', 'music'), MODES.find((m) => m.id === 'music')!.prompt);
+  eq('an unknown mode falls back', promptFor('X', 'nope' as never), `X\n\n${modeFor(DEFAULT_MODE).prompt}`);
+}
+
+// ------------------------------------------------------------------ images
+
+section('image generation');
+{
+  eqList('openai models', imageModels('openai').map((m) => m.model), ['gpt-image-1', 'dall-e-3']);
+  eqList('gemini models', imageModels('gemini').map((m) => m.model), [
+    'gemini-2.5-flash-image',
+    'imagen-4.0-generate-001',
+    'imagen-3.0-generate-002'
+  ]);
+  eq('a provider with no drawing models', imageModels('groq').length, 0);
+  // The endpoint comes from the curated list, not from the name: `gpt-image-1`
+  // contains "image" but is served by OpenAI's endpoint, not Google's.
+  eq('gpt-image-1 goes to the openai endpoint', findImageModel('openai', 'gpt-image-1')!.kind, 'OPENAI_IMAGE');
+  eq('dall-e-3 goes to the openai endpoint', findImageModel('openai', 'dall-e-3')!.kind, 'OPENAI_IMAGE');
+  eq('gemini image goes to the gemini endpoint', findImageModel('gemini', 'gemini-2.5-flash-image')!.kind, 'GEMINI_IMAGE');
+  eq('imagen goes to :predict', findImageModel('gemini', 'imagen-4.0-generate-001')!.kind, 'IMAGEN');
+  eq('flux goes to the openai endpoint', findImageModel('fireworks', 'flux-1-schnell-fp8')!.kind, 'OPENAI_IMAGE');
+  eq('a chat model is refused', findImageModel('openai', 'gpt-4o'), null);
+  eq('a drawing model on a chat-only provider is refused', findImageModel('groq', 'gpt-image-1'), null);
+  eq('a hosted provider is never taken at its word', findImageModel('groq', 'some-flux-x'), null);
+  eq('a custom gateway may be taken at its word', findImageModel('custom', 'some-flux-x')!.kind, 'OPENAI_IMAGE');
+  eq('a custom gemini gateway routes to gemini', findImageModel('custom', 'qwen-image-x', 'GEMINI_CONTENT')!.kind, 'GEMINI_IMAGE');
+  eq('a custom gateway keeps imagen', findImageModel('custom', 'imagen-9-x', 'GEMINI_CONTENT')!.kind, 'IMAGEN');
+  eq('a custom gateway rejects an unnamed model', findImageModel('custom', 'mystery-model'), null);
+  eq('can generate for a curated pair', canGenerate('openai', 'gpt-image-1'), true);
+  eq('cannot generate for a chat model', canGenerate('openai', 'gpt-4o'), false);
+  check('drawing providers are listed', imageProviderIds().includes('gemini') && imageProviderIds().includes('together'), imageProviderIds().join(','));
+  check('flux is recognised', looksLikeImageModel('black-forest-labs/FLUX.1-schnell'));
+  check('a chat model is not', !looksLikeImageModel('llama-3.3-70b-versatile'));
+  eq('every curated model has an endpoint', allImageModels().every((m) => Boolean(m.kind)), true);
+
+  // A model the account discovered is trusted when the catalogue is all we have.
+  const discovered = [{ id: 'some-flux-preview', inputPerMTok: null, outputPerMTok: null, contextLength: null }];
+  eqList('discovered drawing models are offered', imageModels('custom', discovered).map((m) => m.model), ['some-flux-preview']);
+  eq('discovered text models are not', imageModels('custom', [{ id: 'gpt-4o', inputPerMTok: 1, outputPerMTok: 2, contextLength: null }]).length, 0);
+
+  const req = { prompt: 'a cat', size: 'LANDSCAPE' as const, count: 2 };
+  eq('openai url', imageUrl('https://api.openai.com/v1', 'gpt-image-1', 'OPENAI_IMAGE'), 'https://api.openai.com/v1/images/generations');
+  eq('imagen url', imageUrl('https://g/v1beta', 'imagen-4.0-generate-001', 'IMAGEN'), 'https://g/v1beta/models/imagen-4.0-generate-001:predict');
+  eq('gemini image url', imageUrl('https://g/v1beta', 'gemini-2.5-flash-image', 'GEMINI_IMAGE'), 'https://g/v1beta/models/gemini-2.5-flash-image:generateContent');
+
+  const gpt = buildOpenAiBody('gpt-image-1', req);
+  eq('openai model', gpt.model, 'gpt-image-1');
+  eq('openai prompt', gpt.prompt, 'a cat');
+  eq('openai count', gpt.n, 2);
+  eq('openai size', gpt.size, '1536x1024');
+  eq('gpt-image asks for png', gpt.output_format, 'png');
+  check('gpt-image never sends response_format', gpt.response_format === undefined);
+
+  const dalle = buildOpenAiBody('dall-e-3', { prompt: 'x', size: 'PORTRAIT', count: 1 });
+  eq('dall-e3 portrait size', dalle.size, '1024x1792');
+  eq('dall-e3 asks for bytes', dalle.response_format, 'b64_json');
+  eq('dall-e-2 is fixed', buildOpenAiBody('dall-e-2', { prompt: 'x', size: 'SQUARE', count: 1 }).size, '512x512');
+
+  const imagen = buildImagenBody(req);
+  eq('imagen prompt nests under instances', (imagen.instances as Array<Record<string, unknown>>)[0].prompt, 'a cat');
+  eq('imagen sample count', (imagen.parameters as Record<string, unknown>).sampleCount, 2);
+  eq('imagen aspect ratio', (imagen.parameters as Record<string, unknown>).aspectRatio, '3:2');
+
+  eq('openai parses b64', parseOpenAi({ data: [{ b64_json: 'AAA', revised_prompt: 'a nicer cat' }] }, 'gpt-image-1')[0].data, 'AAA');
+  eq('openai keeps the revised prompt', parseOpenAi({ data: [{ b64_json: 'AAA', revised_prompt: 'nicer' }] }, 'm')[0].revisedPrompt, 'nicer');
+  eq('imagen parses predictions', parseImagen({ predictions: [{ bytesBase64Encoded: 'BBB', mimeType: 'image/jpeg' }] }, 'imagen-4')[0].mimeType, 'image/jpeg');
+  eq('gemini parses inline data', parseGemini({ candidates: [{ content: { parts: [{ inlineData: { data: 'CCC', mimeType: 'image/png' } }] } }] }, 'gemini-2.5-flash-image')[0].data, 'CCC');
+  eq('a text-only gemini answer yields no image', parseGemini({ candidates: [{ content: { parts: [{ text: 'maaf' }] } }] }, 'm').length, 0);
+  eq('extension follows the mime type', `${extensionFor('image/jpeg')}/${extensionFor('image/webp')}/${extensionFor('image/png')}`, 'jpg/webp/png');
+  eq('three sizes offered', IMAGE_SIZES.length, 3);
+}
+
+// ------------------------------------------------------------------ backup
+
+section('backup format');
+{
+  check('filename is stamped', /^selfdev-backup-\d{4}-\d{2}-\d{2}-\d{4}\.selfdev$/.test(suggestedFilename(1_758_000_000_000)), suggestedFilename(1758000000000));
+  eq('extension', EXTENSION, 'selfdev');
+  eq('format', FORMAT, 'selfdev-backup');
+  eq('version', VERSION, 1);
+
+  const session = { id: 's1', title: 't', model: 'm', projectId: null, messages: [], createdAt: 1, updatedAt: 1 };
+  const settings = {
+    config: normalizeConfig({ provider: 'groq', apiKey: 'secret-key', model: 'llama-3.3-70b-versatile' }),
+    workspaceMode: 'code' as WorkspaceMode,
+    toolsEnabled: true,
+    speakReplies: false,
+    language: 'id' as const,
+    onboarded: true
+  };
+
+  const withoutKey = buildPayload({ settings, sessions: [session], projects: [], includeApiKey: false });
+  eq('api key excluded by default', withoutKey.settings.config.apiKey, '');
+  eq('sessions counted', withoutKey.counts.sessions, 1);
+  const withKey = buildPayload({ settings, sessions: [session], projects: [], includeApiKey: true });
+  eq('api key included on request', withKey.settings.config.apiKey, 'secret-key');
+
+  // Round trip through the real cipher.
+  const sealed = sealPayload(withKey, 'correct horse');
+  check('ciphertext is not the plaintext', !sealed.toString('utf8').includes('secret-key'), 'plaintext leaked');
+  const opened = openPayload(sealed, 'correct horse');
+  eq('round trip keeps the model', opened.settings.config.model, 'llama-3.3-70b-versatile');
+  eq('round trip keeps the key', opened.settings.config.apiKey, 'secret-key');
+  eq('round trip keeps sessions', opened.sessions.length, 1);
+  eq('round trip keeps the mode', opened.settings.workspaceMode, 'code');
+
+  let wrong = '';
+  try {
+    openPayload(sealed, 'wrong passphrase');
+  } catch (err) {
+    wrong = (err as Error).message;
+  }
+  check('wrong passphrase is refused', /Passphrase salah/.test(wrong), wrong);
+
+  let foreign = '';
+  try {
+    parsePayload(JSON.stringify({ format: 'something-else', version: 1 }));
+  } catch (err) {
+    foreign = (err as Error).message;
+  }
+  check('a foreign file is refused', /bukan backup SelfDev/.test(foreign), foreign);
+
+  let future = '';
+  try {
+    parsePayload(JSON.stringify({ format: FORMAT, version: 99, settings }));
+  } catch (err) {
+    future = (err as Error).message;
+  }
+  check('a future version is refused, not guessed at', /tidak bisa dibaca/.test(future), future);
+}
+
+// ------------------------------------------------------------------- docs
+
+section('docs content');
+{
+  eq('docs sections', DOCS.length, 8);
+  check('every section has a body', DOCS.every((d) => d.body.length > 0), 'empty section');
+  check('every section has a title', DOCS.every((d) => d.title.trim().length > 4), 'untitled section');
+  check('answers name the providers this build ships', DOCS.some((d) => d.title.includes('Provider')), 'no provider entry');
 }
 
 // ------------------------------------------------------------------ summary

@@ -13,7 +13,7 @@ import {
   resolve,
   WIRE_APIS
 } from '../shared/providers';
-import type { AppConfig, PersistedState, Project, ProviderId, Session, WireApi, WorkspaceMode } from '../shared/types';
+import type { AppConfig, BackupSettings, PersistedState, Project, ProviderId, Session, WireApi, WorkspaceMode } from '../shared/types';
 import { DEFAULT_MODE, isValidWorkspaceMode } from '../shared/modes';
 import { open as unseal, seal } from './keyVault';
 
@@ -276,6 +276,42 @@ export class Store {
     this.state.language = lang === 'en' ? 'en' : 'id';
     this.scheduleWrite();
     return this.state.language;
+  }
+
+  /** Everything a backup carries, in one object. */
+  backupSettings(): BackupSettings {
+    return {
+      config: this.getConfig(),
+      workspaceMode: this.state.workspaceMode,
+      toolsEnabled: this.state.toolsEnabled,
+      speakReplies: this.state.speakReplies,
+      language: this.state.language,
+      onboarded: this.state.onboarded
+    };
+  }
+
+  /** Applies a restored backup wholesale, sessions and projects included. */
+  restoreFrom(settings: BackupSettings, sessions: Session[], projects: Project[]): void {
+    const cfg = normalizeConfig(settings.config);
+    this.state.config = { ...cfg, apiKey: seal(cfg.apiKey) };
+    this.state.workspaceMode = isValidWorkspaceMode(settings.workspaceMode) ? settings.workspaceMode : DEFAULT_MODE;
+    this.state.toolsEnabled = settings.toolsEnabled !== false;
+    this.state.speakReplies = settings.speakReplies === true;
+    this.state.language = settings.language === 'en' ? 'en' : 'id';
+    this.state.onboarded = settings.onboarded !== false;
+    this.state.sessions = sessions
+      .filter((s) => this.isSession(s))
+      .slice(0, MAX_SESSIONS)
+      .map((s) => this.normalizeSession(s));
+    this.state.projects = projects
+      .filter((p) => this.isProject(p))
+      .slice(0, MAX_PROJECTS)
+      .map((p) => this.normalizeProject(p));
+    this.state.activeProjectId = this.state.projects.some((p) => p.id === this.state.activeProjectId)
+      ? this.state.activeProjectId
+      : null;
+    this.ensureActiveSession();
+    void this.flush();
   }
 
   setOnboarded(done: boolean): boolean {

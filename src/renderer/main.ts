@@ -14,9 +14,14 @@ import {
   supportsDiscovery
 } from '../shared/providers';
 import { DOCS } from '../shared/docs';
+import { IMAGE_SIZES, findImageModel, imageModels, imageProviderIds } from '../shared/imagegen';
+import { suggestedFilename } from '../shared/backupFormat';
 import { MODES, modeFor, modeUsesTools } from '../shared/modes';
 import type {
   AppConfig,
+  GeneratedImage,
+  ImageGenModel,
+  ImageSize,
   ModelEntry,
   Project,
   ProviderId,
@@ -99,6 +104,34 @@ interface Bridge {
   saveProject(input: Partial<Project> & { name: string }): Promise<Project>;
   deleteProject(id: string): Promise<Project[]>;
   setActiveProject(id: string | null): Promise<string | null>;
+
+  backupExport(opts: { passphrase: string; includeApiKey: boolean; defaultPath: string }): Promise<{
+    ok: boolean;
+    cancelled: boolean;
+    path?: string;
+    counts?: { sessions: number; projects: number };
+    withKey?: boolean;
+  }>;
+  backupImport(opts: { passphrase: string }): Promise<{
+    ok: boolean;
+    cancelled: boolean;
+    path?: string;
+    counts?: { sessions: number; projects: number };
+    exportedAt?: number;
+  }>;
+
+  imageModels(providerId: string, customWireApi?: WireApi): Promise<ImageGenModel[]>;
+  imageGenerate(params: {
+    provider: ProviderId;
+    customBaseUrl: string;
+    customWireApi: WireApi;
+    apiKey: string;
+    model: string;
+    prompt: string;
+    size: 'SQUARE' | 'LANDSCAPE' | 'PORTRAIT';
+    count: number;
+  }): Promise<GeneratedImage[]>;
+  imageSave(params: { data: string; mimeType: string; model: string }): Promise<{ ok: boolean; cancelled: boolean; path?: string }>;
   setTheme(theme: 'light' | 'dark'): Promise<'light' | 'dark'>;
   pickWorkspace(): Promise<string | null>;
   revealWorkspace(): Promise<boolean>;
@@ -193,6 +226,9 @@ function grab(): void {
     'screenWelcome', 'sdWelcomeStart', 'sdWelcomeSkip',
     'screenProjects', 'sdProjectList', 'sdProjectNew', 'sdProjectAll',
     'screenDocs', 'sdDocsList',
+    'screenImages', 'sdImgModel', 'sdImgModelNote', 'sdImgPrompt', 'sdImgSizes', 'sdImgRun',
+    'sdImgCancel', 'sdImgStatus', 'sdImgResults',
+    'sdBackupPass', 'sdBackupToggle', 'sdBackupKey', 'sdBackupExport', 'sdBackupImport', 'sdBackupResult',
     'sdUpdate', 'sdUpdateText', 'sdUpdateBar', 'sdUpdateAction', 'sdUpdateDismiss',
     'sdUpdateCheck', 'sdUpdateVersion', 'sdUpdateNote',
     // settings dialog
@@ -343,7 +379,7 @@ function renderHeader(): void {
 
 /* --------------------------------------------------------------- screens -- */
 
-type ScreenId = 'console' | 'projects' | 'docs';
+type ScreenId = 'console' | 'projects' | 'images' | 'docs';
 
 /** One screen in the document flow at a time, so none steals the other's scroll. */
 function showScreen(id: ScreenId): void {
@@ -360,6 +396,201 @@ function renderNav(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-screen]').forEach((btn) => {
     btn.classList.toggle('is-on', btn.dataset.screen === ui.screen);
   });
+}
+
+/* ---------------------------------------------------------------- backup -- */
+
+async function exportBackup(): Promise<void> {
+  const pass = (el.sdBackupPass as HTMLInputElement | undefined)?.value ?? '';
+  const out = el.sdBackupResult as HTMLElement | undefined;
+  if (!pass) {
+    if (out) {
+      out.textContent = '✘ Isi passphrase dulu.';
+      out.className = 'sd-test-result bad';
+    }
+    return;
+  }
+  try {
+    const res = await bridge.backupExport({
+      passphrase: pass,
+      includeApiKey: (el.sdBackupKey as HTMLInputElement | undefined)?.checked === true,
+      defaultPath: suggestedFilename()
+    });
+    if (res.cancelled || !out) return;
+    out.textContent = `✔ ${res.counts?.sessions ?? 0} sesi · ${res.counts?.projects ?? 0} proyek disimpan${res.withKey ? ' (termasuk API key)' : ''}.`;
+    out.className = 'sd-test-result ok';
+    toast('Backup tersimpan', 'ok');
+  } catch (err) {
+    if (out) {
+      out.textContent = `✘ ${messageOf(err)}`;
+      out.className = 'sd-test-result bad';
+    }
+  }
+}
+
+async function importBackup(): Promise<void> {
+  const pass = (el.sdBackupPass as HTMLInputElement | undefined)?.value ?? '';
+  const out = el.sdBackupResult as HTMLElement | undefined;
+  if (!window.confirm('Restore akan MENGGANTI pengaturan, sesi, dan proyek yang ada sekarang.\n\nLanjut?')) return;
+  try {
+    const res = await bridge.backupImport({ passphrase: pass });
+    if (res.cancelled) return;
+    await refresh();
+    if (out) {
+      out.textContent = `✔ Restore selesai · ${res.counts?.sessions ?? 0} sesi · ${res.counts?.projects ?? 0} proyek.`;
+      out.className = 'sd-test-result ok';
+    }
+    toast('Backup dipulihkan', 'ok');
+  } catch (err) {
+    if (out) {
+      out.textContent = `✘ ${messageOf(err)}`;
+      out.className = 'sd-test-result bad';
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- images -- */
+
+interface ImageForm {
+  model: string;
+  size: ImageSize;
+  count: number;
+  running: boolean;
+}
+
+const imageForm: ImageForm = { model: '', size: 'SQUARE', count: 1, running: false };
+
+/**
+ * The provider whose picker this screen uses.
+ *
+ * A desktop account is usually scoped to whichever provider it was opened for, so
+ * the active one is preferred; anything that cannot draw falls back to the first
+ * provider that can rather than showing an empty screen.
+ */
+function imageProvider(): ProviderId {
+  const drawable = imageProviderIds();
+  return drawable.includes(ui.config.provider) ? ui.config.provider : drawable[0];
+}
+
+function renderImageModels(): void {
+  const select = el.sdImgModel as HTMLSelectElement | undefined;
+  const note = el.sdImgModelNote as HTMLElement | undefined;
+  if (!select) return;
+  const provider = imageProvider();
+  const models = imageModels(provider, [], ui.config.customWireApi);
+  select.innerHTML = models.length
+    ? models.map((m) => `<option value="${escapeHtml(m.model)}">${escapeHtml(m.label)}</option>`).join('')
+    : '<option value="">—</option>';
+  if (!models.length) {
+    if (note) note.textContent = `Tidak ada model gambar untuk ${presetFor(provider).label}.`;
+    imageForm.model = '';
+    renderImageRunState();
+    return;
+  }
+  imageForm.model = models[0].model;
+  select.value = imageForm.model;
+  if (note) {
+    const kind = findImageModel(provider, imageForm.model, ui.config.customWireApi)?.kind ?? '';
+    note.textContent = `Provider ${presetFor(provider).label} · endpoint ${kind.replace(/_/g, ' ').toLowerCase()}`;
+  }
+  renderImageRunState();
+}
+
+function renderImageSizes(): void {
+  const box = el.sdImgSizes as HTMLElement | undefined;
+  if (!box || box.dataset.built === '1') return;
+  box.dataset.built = '1';
+  box.innerHTML = IMAGE_SIZES.map(
+    (s) => `<button class="sd-pill${s.id === imageForm.size ? ' is-on' : ''}" type="button" data-size="${s.id}">${escapeHtml(s.label)}</button>`
+  ).join('');
+  box.querySelectorAll<HTMLButtonElement>('[data-size]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      imageForm.size = btn.dataset.size as ImageSize;
+      renderImageSizes();
+    });
+  });
+}
+
+function renderImageRunState(): void {
+  const run = el.sdImgRun as HTMLButtonElement | undefined;
+  const cancel = el.sdImgCancel as HTMLButtonElement | undefined;
+  const status = el.sdImgStatus as HTMLElement | undefined;
+  const prompt = (el.sdImgPrompt as HTMLTextAreaElement | undefined)?.value.trim() ?? '';
+  const ready = Boolean(imageForm.model) && prompt.length > 0 && !imageForm.running;
+  if (run) {
+    run.disabled = !ready;
+    run.innerHTML = imageForm.running
+      ? `<span class="sd-spin">${icon('spinner', 'ic ic-sm')}</span> Membuat…`
+      : `${icon('sparkle', 'ic ic-sm')} Buat gambar`;
+  }
+  if (cancel) cancel.hidden = !imageForm.running;
+  if (status) {
+    status.hidden = !imageForm.running;
+    status.textContent = 'meminta…';
+  }
+}
+
+function renderImageResults(images: GeneratedImage[]): void {
+  const box = el.sdImgResults as HTMLElement | undefined;
+  if (!box) return;
+  box.innerHTML = images
+    .map(
+      (img, i) => `<figure class="sd-image-card" data-index="${i}">
+        <img alt="Gambar ${i + 1}" src="data:${escapeHtml(img.mimeType)};base64,${img.data}" />
+        <figcaption class="sd-image-card-body">
+          <span class="sd-image-card-model">${escapeHtml(img.model)}</span>
+          ${img.revisedPrompt ? `<span class="sd-image-card-revised">${escapeHtml(img.revisedPrompt)}</span>` : ''}
+          <button class="sd-btn sd-btn-outline sd-btn-sm" type="button" data-save="${i}">${icon('download', 'ic ic-xs')} Simpan</button>
+        </figcaption>
+      </figure>`
+    )
+    .join('');
+
+  box.querySelectorAll<HTMLButtonElement>('[data-save]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const img = images[Number(btn.dataset.save)];
+      if (!img) return;
+      const res = await bridge.imageSave({ data: img.data, mimeType: img.mimeType, model: img.model });
+      if (res.ok && res.path) toast(`Tersimpan: ${shortPath(res.path)}`, 'ok');
+    });
+  });
+}
+
+function renderImageError(message: string): void {
+  const box = el.sdImgResults as HTMLElement | undefined;
+  if (box) box.innerHTML = `<div class="sd-image-error">${escapeHtml(message)}</div>`;
+}
+
+async function generateImage(): Promise<void> {
+  const prompt = (el.sdImgPrompt as HTMLTextAreaElement | undefined)?.value.trim() ?? '';
+  if (!prompt || imageForm.running || !imageForm.model) return;
+  imageForm.running = true;
+  renderImageRunState();
+  const box = el.sdImgResults as HTMLElement | undefined;
+  if (box) box.innerHTML = '';
+  try {
+    const images = await bridge.imageGenerate({
+      provider: imageProvider(),
+      customBaseUrl: ui.config.customBaseUrl,
+      customWireApi: ui.config.customWireApi,
+      apiKey: ui.config.apiKey,
+      model: imageForm.model,
+      prompt,
+      size: imageForm.size,
+      count: imageForm.count
+    });
+    if (!images.length) {
+      renderImageError('Provider tidak mengembalikan gambar. Coba prompt lain atau model berbeda.');
+      return;
+    }
+    renderImageResults(images);
+    toast(`${images.length} gambar dibuat`, 'ok');
+  } catch (err) {
+    renderImageError(messageOf(err));
+  } finally {
+    imageForm.running = false;
+    renderImageRunState();
+  }
 }
 
 /* ------------------------------------------------------------------ docs -- */
@@ -1780,11 +2011,38 @@ function wireEvents(): void {
   });
 
   document.querySelectorAll<HTMLButtonElement>('[data-screen]').forEach((btn) => {
-    btn.addEventListener('click', () => showScreen(btn.dataset.screen as ScreenId));
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.screen as ScreenId;
+      showScreen(target);
+      if (target === 'images') {
+        renderImageSizes();
+        renderImageModels();
+      }
+    });
   });
 
   (el.sdProjectNew as HTMLButtonElement).addEventListener('click', () => editProject(''));
   (el.sdProjectAll as HTMLButtonElement).addEventListener('click', () => void openProject(null));
+
+  // images
+  (el.sdImgPrompt as HTMLTextAreaElement).addEventListener('input', renderImageRunState);
+  (el.sdImgModel as HTMLSelectElement).addEventListener('change', (e) => {
+    imageForm.model = (e.target as HTMLSelectElement).value;
+    renderImageRunState();
+  });
+  (el.sdImgRun as HTMLButtonElement).addEventListener('click', () => void generateImage());
+  (el.sdImgCancel as HTMLButtonElement).addEventListener('click', () => {
+    imageForm.running = false;
+    renderImageRunState();
+  });
+
+  // backup
+  (el.sdBackupExport as HTMLButtonElement)?.addEventListener('click', () => void exportBackup());
+  (el.sdBackupImport as HTMLButtonElement)?.addEventListener('click', () => void importBackup());
+  (el.sdBackupToggle as HTMLButtonElement)?.addEventListener('click', () => {
+    const input = el.sdBackupPass as HTMLInputElement;
+    input.type = input.type === 'password' ? 'text' : 'password';
+  });
 
   // Welcome: the one screen that matters when there is no key yet.
   (el.sdWelcomeStart as HTMLButtonElement)?.addEventListener('click', () => {
