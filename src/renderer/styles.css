@@ -198,9 +198,12 @@ body {
 .ic-sm { width: 13px; height: 13px; }
 .ic-xs { width: 11px; height: 11px; }
 
-.sd-spin { animation: sd-rotate 0.8s linear infinite; }
+.sd-spin { display: inline-flex; animation: sd-rotate 0.8s linear infinite; }
 @keyframes sd-rotate {
   to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sd-spin { animation: none; }
 }
 
 /* shared control reset so every button reads as the same family */
@@ -248,18 +251,6 @@ body {
   color: var(--text-strong);
   font-size: 0.95rem;
   letter-spacing: -0.01em;
-}
-.sd-appbar-badge {
-  width: 26px;
-  height: 26px;
-  border-radius: var(--r-xs);
-  background: var(--mark-bg);
-  color: var(--mark-ink);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 900;
-  font-size: 0.9rem;
 }
 .sd-appbar-sub {
   color: var(--text-muted);
@@ -446,19 +437,6 @@ body {
   font-size: 1rem;
   letter-spacing: -0.01em;
   min-width: 0;
-}
-.sd-brand-badge {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--r-xs);
-  background: var(--mark-bg);
-  color: var(--mark-ink);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 900;
-  font-size: 0.95rem;
-  flex: 0 0 auto;
 }
 .sd-brand-sub {
   color: var(--text-muted);
@@ -665,10 +643,7 @@ body {
   width: 58px;
   height: 58px;
   margin: 0 auto 1rem;
-  border-radius: var(--r-md);
-  background: var(--agent-faint);
-  border: 1px solid var(--agent-line);
-  color: var(--agent);
+  border-radius: 26%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1125,7 +1100,7 @@ body.dark .sd-toolpop button .ic { color: var(--accent); }
   padding: 1.2rem;
   box-shadow: var(--shadow-lg);
 }
-.sd-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.sd-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; gap: 0.6rem; }
 .sd-modal-head h3 {
   font-size: 1.05rem;
   color: var(--text-strong);
@@ -1133,6 +1108,7 @@ body.dark .sd-toolpop button .ic { color: var(--accent); }
   align-items: center;
   gap: 0.5rem;
   letter-spacing: -0.01em;
+  flex: 1;
 }
 .sd-modal-head h3 .ic { color: var(--agent); }
 .sd-modal-close {
@@ -1181,7 +1157,7 @@ body.dark .sd-toolpop button .ic { color: var(--accent); }
   font-size: 0.95em;
 }
 .sd-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
-.sd-test-result { font-size: 0.76rem; font-weight: 700; min-height: 1.2rem; margin-bottom: 0.4rem; }
+.sd-test-result { font-size: 0.76rem; font-weight: 700; min-height: 1.2rem; margin-bottom: 0.4rem; word-break: break-word; }
 .sd-test-result.ok { color: var(--ok-text); }
 .sd-test-result.bad { color: var(--bad-text); }
 .sd-modal-actions { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
@@ -1213,6 +1189,345 @@ body.dark .sd-toolpop button .ic { color: var(--accent); }
 }
 .sd-btn-outline:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
 .sd-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.sd-btn-sm { flex: 0 0 auto; padding: 0.4rem 0.7rem; font-size: 0.76rem; }
+
+/* ============================================================= app mark (logo)
+
+   Injected by the renderer rather than kept in the icon sprite: a gradient
+   referenced from inside a display:none <svg> never paints, so the mark has to
+   arrive as a self-contained visible <svg> with its own paint server. */
+.sd-mark { flex: 0 0 auto; display: inline-flex; }
+.sd-mark svg { display: block; }
+.sd-mark-appbar svg, .sd-mark-brand svg, .sd-mark-modal svg { border-radius: 6px; }
+.sd-mark-appbar svg { width: 22px; height: 22px; border-radius: 6px; }
+.sd-mark-brand svg { width: 20px; height: 20px; border-radius: 5px; }
+.sd-mark-modal svg { width: 22px; height: 22px; border-radius: 6px; }
+.sd-mark-empty svg { width: 100%; height: 100%; border-radius: 26%; }
+
+/* ============================================================ settings card */
+.sd-settings-card {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0.9rem;
+  overflow: hidden;
+}
+.sd-settings-card:focus { outline: none; }
+.sd-settings-scroll {
+  overflow-y: auto;
+  margin: 0 -0.2rem;
+  padding: 0 0.2rem;
+  flex: 1;
+  min-height: 0;
+}
+.sd-settings-scroll::-webkit-scrollbar,
+.sd-radio-list::-webkit-scrollbar,
+.sd-model-list::-webkit-scrollbar { width: 8px; }
+.sd-settings-scroll::-webkit-scrollbar-thumb,
+.sd-radio-list::-webkit-scrollbar-thumb,
+.sd-model-list::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.sd-settings-scroll::-webkit-scrollbar-thumb:hover,
+.sd-radio-list::-webkit-scrollbar-thumb:hover,
+.sd-model-list::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
+
+/* While a request is in flight the dialog is pinned open: no dismissal, and the
+   close button visibly does nothing until the answer is in. */
+.sd-modal.busy .sd-modal-card { cursor: progress; }
+.sd-modal.busy .sd-modal-close { opacity: 0.35; cursor: not-allowed; }
+.sd-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--agent);
+  background: var(--agent-faint);
+  border: 1px solid var(--agent-line);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+}
+.sd-lock[hidden] { display: none; }
+
+/* ------------------------------------------------------------- sections --- */
+.sd-sec {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  margin-bottom: 0.6rem;
+  background: var(--panel-alt);
+  overflow: hidden;
+}
+.sd-sec-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+  text-align: left;
+  font-family: inherit;
+}
+.sd-sec-head:hover { background: var(--sunken); }
+.sd-sec-icon { display: inline-flex; color: var(--agent); }
+.sd-sec-text { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; min-width: 0; }
+.sd-sec-title { font-size: 0.86rem; font-weight: 800; }
+.sd-sec-sub {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sd-sec-chev {
+  display: inline-flex;
+  color: var(--text-muted);
+  transition: transform 0.16s ease;
+  transform: rotate(-90deg);
+}
+.sd-sec.open .sd-sec-chev { transform: rotate(0deg); }
+.sd-sec-body { display: none; padding: 0.1rem 0.7rem 0.7rem; }
+.sd-sec.open .sd-sec-body { display: block; }
+.sd-sub { border-top: 1px dashed var(--border-soft); margin-top: 0.5rem; padding-top: 0.5rem; }
+.sd-sub[hidden] { display: none; }
+
+/* ------------------------------------------------------------ provider ---- */
+.sd-radio-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 232px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.sd-radio {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.42rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  font-family: inherit;
+}
+.sd-radio:hover { background: var(--sunken); }
+.sd-radio.on {
+  background: color-mix(in srgb, var(--agent) 9%, transparent);
+  border-color: var(--agent-line);
+}
+.sd-radio-mark {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1.6px solid var(--border-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--agent-ink);
+}
+.sd-radio.on .sd-radio-mark { background: var(--agent); border-color: var(--agent); }
+.sd-radio-main { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; min-width: 0; }
+.sd-radio-label { font-size: 0.82rem; font-weight: 700; display: inline-flex; align-items: center; gap: 0.35rem; }
+.sd-radio-sub {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sd-radio-wire {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  flex: 0 0 auto;
+}
+.sd-chip-mini {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 0.08rem 0.3rem;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--border-soft);
+  color: var(--text-muted);
+}
+.sd-chip-mini.local { background: var(--ok-bg); color: var(--ok-text); border-color: transparent; }
+.sd-chip-mini.env { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* --------------------------------------------------------------- key ------ */
+.sd-badge {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  padding: 0.14rem 0.45rem;
+  border-radius: 999px;
+  background: var(--neutral-bg);
+  color: var(--neutral-text);
+  margin-bottom: 0.5rem;
+}
+.sd-badge.ok { background: var(--ok-bg); color: var(--ok-text); }
+.sd-badge.empty { background: var(--warn-bg); color: var(--warn-text); }
+.sd-badge[hidden] { display: none; }
+
+.sd-input-wrap { position: relative; display: flex; align-items: stretch; }
+.sd-input-wrap input { padding-right: 2.4rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.sd-input-action {
+  position: absolute;
+  right: 0.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.35rem 0.4rem;
+  display: inline-flex;
+  border-radius: var(--r-xs);
+}
+.sd-input-action:hover { color: var(--text); background: var(--sunken); }
+.sd-input-action-text {
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--accent);
+  padding: 0.3rem 0.5rem;
+}
+.sd-input-action-text:hover { color: var(--accent-hover); }
+
+.sd-btn-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; }
+.sd-link-danger {
+  background: none;
+  border: none;
+  color: var(--bad-text);
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.sd-link-danger[hidden] { display: none; }
+
+.sd-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--r-sm);
+  margin-bottom: 0.5rem;
+  border: 1px solid transparent;
+}
+.sd-notice[hidden] { display: none; }
+.sd-notice-icon { display: inline-flex; flex: 0 0 auto; margin-top: 0.05rem; }
+.sd-notice-text { flex: 1; min-width: 0; }
+.sd-notice-action {
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  flex: 0 0 auto;
+}
+.sd-notice-action[hidden] { display: none; }
+.sd-notice.info { background: var(--info-bg); color: var(--info-text); }
+.sd-notice.ok { background: var(--ok-bg); color: var(--ok-text); }
+.sd-notice.warn { background: var(--warn-bg); color: var(--warn-text); }
+.sd-notice.bad { background: var(--bad-bg); color: var(--bad-text); }
+.sd-notice.billing { background: var(--cap-bg); color: var(--cap-text); }
+
+/* ------------------------------------------------------------- model ------ */
+.sd-model-list { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.sd-model-list:empty { display: none; }
+.sd-model-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  font-family: inherit;
+}
+.sd-model-row:hover { background: var(--sunken); }
+.sd-model-row.on { background: color-mix(in srgb, var(--agent) 9%, transparent); border-color: var(--agent-line); }
+.sd-model-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sd-model-meta { font-size: 0.66rem; color: var(--text-muted); flex: 0 0 auto; }
+.sd-model-active {
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--agent);
+  flex: 0 0 auto;
+}
+.sd-tier {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  padding: 0.05rem 0.3rem;
+  border-radius: var(--r-xs);
+  flex: 0 0 auto;
+}
+.sd-tier.cheap { background: var(--ok-bg); color: var(--ok-text); }
+.sd-tier.mid { background: var(--warn-bg); color: var(--warn-text); }
+.sd-tier.heavy { background: var(--cap-bg); color: var(--cap-text); }
+.sd-empty-note { font-size: 0.72rem; color: var(--text-muted); padding: 0.3rem 0; }
+.sd-legend { font-size: 0.66rem; color: var(--text-muted); margin-top: 0.5rem; line-height: 1.5; }
+.sd-legend .ic { vertical-align: -2px; }
+.sd-legend-item { font-weight: 800; color: var(--ok-text); }
+.sd-legend-item.mid { color: var(--warn-text); }
+.sd-legend-item.high { color: var(--cap-text); }
+
+/* ------------------------------------------------------------- pills ------ */
+.sd-pills { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.sd-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--text-soft);
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sd-pill.is-on { background: var(--agent); border-color: var(--agent); color: var(--agent-ink); }
+.sd-pills-plain .sd-pill { cursor: default; }
+.sd-pills-plain .sd-pill:not(.is-on) { color: var(--text-muted); }
+.sd-pills-wire .sd-pill { font-size: 0.72rem; padding: 0.25rem 0.6rem; }
+
+.sd-spin { display: inline-flex; }
 
 /* ==================================================================== toast */
 .sd-toast {

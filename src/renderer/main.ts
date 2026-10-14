@@ -1,12 +1,29 @@
 import { renderMarkdown, escapeHtml } from './markdown';
+import { economiesFor, estimateEconomy, formatPrice, isBadgeWorthy, tierGlyph } from '../shared/economy';
+import {
+  WIRE_APIS,
+  WIRE_API_LABEL,
+  defaultModelFor,
+  detectProviderForKey,
+  isLoopback,
+  isModelValidFor,
+  normalizeBaseUrl,
+  presetFor,
+  rankedModels,
+  repairModelFor,
+  supportsDiscovery
+} from '../shared/providers';
 import type {
   AppConfig,
+  ModelEntry,
   ProviderId,
+  ProviderPreset,
   RunEvent,
   Session,
   ToolMeta,
   ToolCallRecord,
   ToolResultRecord,
+  WireApi,
   WorkspaceMode
 } from '../shared/types';
 
@@ -20,6 +37,23 @@ interface StatePayload {
   theme: 'light' | 'dark';
   workspaceMode: WorkspaceMode;
   tools: ToolMeta[];
+  keyProtection: 'keychain' | 'plain';
+}
+
+interface ConnectionReport {
+  ok: boolean;
+  message: string;
+  kind: string | null;
+  billingUrl: string | null;
+  suggestedModel: string | null;
+}
+
+interface ModelsReport {
+  ok: boolean;
+  message: string;
+  kind: string | null;
+  billingUrl: string | null;
+  models: ModelEntry[];
 }
 
 interface UpdatePayload {
@@ -33,8 +67,20 @@ interface UpdatePayload {
 interface Bridge {
   getState(): Promise<StatePayload>;
   saveConfig(patch: Partial<AppConfig>): Promise<StatePayload>;
-  testConnection(p: { provider: ProviderId; baseUrl: string; apiKey: string; model: string }): Promise<{ ok: boolean; message: string }>;
-  getProviders(): Promise<Record<ProviderId, { name: string; baseUrl: string; models: string[] }>>;
+  getProviders(): Promise<ProviderPreset[]>;
+  testConnection(p: {
+    provider: ProviderId;
+    customBaseUrl: string;
+    customWireApi: WireApi;
+    apiKey: string;
+    model: string;
+  }): Promise<ConnectionReport>;
+  fetchModels(p: {
+    provider: ProviderId;
+    customBaseUrl: string;
+    customWireApi: WireApi;
+    apiKey: string;
+  }): Promise<ModelsReport>;
   setMode(mode: WorkspaceMode): Promise<WorkspaceMode>;
   setTheme(theme: 'light' | 'dark'): Promise<'light' | 'dark'>;
   pickWorkspace(): Promise<string | null>;
@@ -77,6 +123,8 @@ interface UiState {
   workspaceRoot: string | null;
   workspaceMode: WorkspaceMode;
   tools: ToolMeta[];
+  keyProtection: 'keychain' | 'plain';
+  presets: ProviderPreset[];
   running: boolean;
   runSessionId: string | null;
   raw: string;
@@ -84,20 +132,22 @@ interface UiState {
 
 const ui: UiState = {
   config: {
-    provider: 'anthropic',
-    baseUrl: '',
+    provider: 'groq',
+    customBaseUrl: '',
+    customWireApi: 'OPENAI_CHAT',
     apiKey: '',
     model: '',
     temperature: 0.6,
-    maxTokens: 4096,
-    system: '',
-    mode: 'anthropic'
+    maxTokens: 2048,
+    system: ''
   },
   sessions: [],
   activeSessionId: null,
   workspaceRoot: null,
   workspaceMode: 'dev',
   tools: [],
+  keyProtection: 'keychain',
+  presets: [],
   running: false,
   runSessionId: null,
   raw: ''
@@ -112,11 +162,19 @@ function grab(): void {
     'sdStatus', 'sdModeToggle', 'sdSideToggle', 'sdClearSessions', 'sdNewSession', 'sdSettingsBtn',
     'sdSidebar', 'sdSessionList', 'sdSessionCount', 'sdMessages', 'sdInput', 'sdSend', 'sdStop',
     'sdToolsBar', 'sdToolPop', 'sdModelLabel', 'sdWsHint', 'sdThemeBtn', 'sdWorkspaceBtn',
-    'sdWorkspaceLabel', 'sdSettings', 'sdProvider', 'sdBaseUrl', 'sdApiKey', 'sdModel',
-    'sdMaxTokens', 'sdTemp', 'sdSystem', 'sdSave', 'sdTest', 'sdTestResult', 'sdSettingsClose',
-    'sdModelList', 'sdToast',
+    'sdWorkspaceLabel', 'sdModelList', 'sdToast',
     'sdUpdate', 'sdUpdateText', 'sdUpdateBar', 'sdUpdateAction', 'sdUpdateDismiss',
-    'sdUpdateCheck', 'sdUpdateVersion', 'sdUpdateNote'
+    'sdUpdateCheck', 'sdUpdateVersion', 'sdUpdateNote',
+    // settings dialog
+    'sdSettings', 'sdSettingsClose', 'sdSettingsLock', 'sdSettingsLockText',
+    'sdProviderList', 'sdProviderSub', 'sdCustomWrap', 'sdCustomBaseUrl', 'sdWirePills',
+    'sdKeySub', 'sdKeyBadge', 'sdApiKey', 'sdKeyToggle', 'sdKeyNote', 'sdKeyClear',
+    'sdSave', 'sdSaveMain', 'sdTest', 'sdTestResult',
+    'sdNotice', 'sdNoticeIcon', 'sdNoticeText', 'sdNoticeAction',
+    'sdModelSub', 'sdFetchModels', 'sdModelCount', 'sdModel', 'sdModelAdd', 'sdModelListBox', 'sdModelNote',
+    'sdSystem', 'sdMaxTokens', 'sdTemp',
+    'sdThemeSub', 'sdThemeLight', 'sdThemeDark', 'sdModeDev', 'sdModePlan',
+    'sdKeyProtection'
   ];
   for (const id of ids) {
     const node = document.getElementById(id);
@@ -128,6 +186,40 @@ function grab(): void {
 
 function icon(name: string, cls = 'ic'): string {
   return `<svg class="${cls}" aria-hidden="true"><use href="#i-${name}" /></svg>`;
+}
+
+/**
+ * The SelfDev mark, drawn from res/drawable/ic_selfdev_logo.xml.
+ *
+ * Deliberately not part of the inline icon sprite: a gradient referenced from
+ * inside a `display:none` <svg> never paints, so the badge has to arrive as a
+ * visible <svg> carrying its own paint server. Every instance gets its own
+ * gradient id so several can coexist on one page.
+ */
+let markSeq = 0;
+function logoSvg(cls = 'sd-mark-empty'): string {
+  const id = `sdLogoGradient${(markSeq += 1)}`;
+  return `<svg class="${cls}" viewBox="0 0 100 100" aria-hidden="true">
+    <defs>
+      <linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#4F46E5" />
+        <stop offset="0.5" stop-color="#2563EB" />
+        <stop offset="1" stop-color="#06B6D4" />
+      </linearGradient>
+    </defs>
+    <path d="M28 0h44c15.46 0 28 12.54 28 28v44c0 15.46-12.54 28-28 28H28C12.54 100 0 87.46 0 72V28C0 12.54 12.54 0 28 0Z" fill="url(#${id})" />
+    <path d="M26 50 36 38M26 50l10 12M74 50 64 38M74 50 64 62" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M50 28 52.2 39.5 63 42 52.2 44.5 50 56 47.8 44.5 37 42 47.8 39.5Z" fill="#F8FAFC" />
+    <circle cx="50" cy="68" r="3.5" fill="#A5F3FC" />
+  </svg>`;
+}
+
+/** Fills every `[data-mark]` placeholder in the static markup. */
+function paintMarks(root: ParentNode = document): void {
+  root.querySelectorAll<HTMLElement>('[data-mark]').forEach((node) => {
+    if (node.querySelector('svg')) return;
+    node.innerHTML = logoSvg('sd-mark-plain');
+  });
 }
 
 function setStatus(text: string, busy = false): void {
@@ -263,7 +355,7 @@ function renderEmpty(): void {
   const ws = ui.workspaceRoot ? shortPath(ui.workspaceRoot) : 'belum dipilih';
   m.innerHTML = `
     <div class="sd-empty">
-      <div class="sd-empty-badge">◆</div>
+      <div class="sd-empty-badge">${logoSvg()}</div>
       <h3>SelfDev · AI Developer Console</h3>
       <p>Asisten coding opencode-style. API key disimpan lokal (BYOK), tools berjalan di proses native.</p>
       <div class="sd-empty-suggest">
@@ -445,6 +537,7 @@ async function refresh(fromMain = true): Promise<void> {
     ui.activeSessionId = state.activeSessionId;
     ui.workspaceRoot = state.workspaceRoot;
     ui.workspaceMode = state.workspaceMode;
+    ui.keyProtection = state.keyProtection ?? ui.keyProtection;
     if (state.tools?.length) ui.tools = state.tools;
   }
   renderSessions();
@@ -632,97 +725,597 @@ function handleRunEvent(evt: RunEvent): void {
 
 /* -------------------------------------------------------------- settings - */
 
-function applyProviderToForm(): void {
-  const provider = (el.sdProvider as HTMLSelectElement).value as ProviderId;
-  void bridge.getProviders().then((providers) => {
-    const p = providers[provider];
-    if (!p) return;
-    (el.sdBaseUrl as HTMLInputElement).value = p.baseUrl;
-    if (p.models.length) (el.sdModel as HTMLInputElement).value = p.models[0];
-    fillModelList(provider);
+/**
+ * Everything the settings dialog edits, kept apart from `ui.config` so a
+ * half-finished setup never leaks into the running app before it is saved.
+ */
+interface SettingsForm {
+  provider: ProviderId;
+  customBaseUrl: string;
+  customWireApi: WireApi;
+  apiKey: string;
+  /** The saved key, so KEY SAVED stays truthful while a new one is being typed. */
+  savedKey: string;
+  keyDirty: boolean;
+  keyVisible: boolean;
+  model: string;
+  catalogue: ModelEntry[];
+  busy: 'save' | 'test' | 'models' | null;
+}
+
+const form: SettingsForm = {
+  provider: 'groq',
+  customBaseUrl: '',
+  customWireApi: 'OPENAI_CHAT',
+  apiKey: '',
+  savedKey: '',
+  keyDirty: false,
+  keyVisible: false,
+  model: '',
+  catalogue: [],
+  busy: null
+};
+
+function settingsOpen(): boolean {
+  return el.sdSettings.classList.contains('open');
+}
+
+/** True while a request is in flight; the dialog may not be dismissed then. */
+function settingsBusy(): boolean {
+  return form.busy !== null;
+}
+
+function setBusy(kind: SettingsForm['busy'], label = 'memproses…'): void {
+  form.busy = kind;
+  const lock = el.sdSettingsLock as HTMLElement | undefined;
+  const text = el.sdSettingsLockText as HTMLElement | undefined;
+  if (lock) lock.hidden = kind === null;
+  if (text) text.textContent = label;
+  el.sdSettings.classList.toggle('busy', kind !== null);
+  const save = el.sdSave as HTMLButtonElement | undefined;
+  const saveMain = el.sdSaveMain as HTMLButtonElement | undefined;
+  const test = el.sdTest as HTMLButtonElement | undefined;
+  const fetchBtn = el.sdFetchModels as HTMLButtonElement | undefined;
+  const add = el.sdModelAdd as HTMLButtonElement | undefined;
+  const clear = el.sdKeyClear as HTMLButtonElement | undefined;
+  if (save) save.disabled = kind !== null;
+  if (saveMain) saveMain.disabled = kind !== null;
+  if (test) test.disabled = kind !== null;
+  if (fetchBtn) fetchBtn.disabled = kind !== null;
+  if (add) add.disabled = kind !== null;
+  if (clear) clear.disabled = kind !== null;
+}
+
+type NoticeLevel = 'info' | 'ok' | 'warn' | 'bad' | 'billing';
+
+const NOTICE_ICON: Record<NoticeLevel, string> = {
+  info: 'info',
+  ok: 'check-circle',
+  warn: 'alert',
+  bad: 'x',
+  billing: 'wallet'
+};
+
+let noticeUrl: string | null = null;
+
+/** One inline line under the API key, with an optional action (e.g. billing). */
+function notice(level: NoticeLevel, text: string, actionLabel?: string, actionUrl?: string): void {
+  const box = el.sdNotice as HTMLElement | undefined;
+  const iconNode = el.sdNoticeIcon as HTMLElement | undefined;
+  const textNode = el.sdNoticeText as HTMLElement | undefined;
+  const action = el.sdNoticeAction as HTMLButtonElement | undefined;
+  if (!box || !iconNode || !textNode || !action) return;
+  noticeUrl = actionUrl ?? null;
+  box.hidden = false;
+  box.className = `sd-notice ${level}`;
+  iconNode.innerHTML = icon(NOTICE_ICON[level], 'ic ic-sm');
+  textNode.textContent = text;
+  if (actionLabel && actionUrl) {
+    action.hidden = false;
+    action.textContent = actionLabel;
+  } else {
+    action.hidden = true;
+  }
+}
+
+function clearNotice(): void {
+  noticeUrl = null;
+  const box = el.sdNotice as HTMLElement | undefined;
+  if (box) box.hidden = true;
+}
+
+function setTestResult(text: string, kind: 'ok' | 'bad' | ''): void {
+  const node = el.sdTestResult as HTMLElement | undefined;
+  if (!node) return;
+  node.textContent = text;
+  node.className = `sd-test-result${kind ? ` ${kind}` : ''}`;
+}
+
+function currentPreset(): ProviderPreset {
+  return presetFor(form.provider);
+}
+
+function requiresKey(): boolean {
+  const preset = currentPreset();
+  if (preset.isLocal) return false;
+  return preset.id !== 'custom' || !isLoopback(normalizeBaseUrl(form.customBaseUrl));
+}
+
+function activeBaseUrl(): string {
+  const preset = currentPreset();
+  return preset.id === 'custom' ? normalizeBaseUrl(form.customBaseUrl) : preset.baseUrl;
+}
+
+// ------------------------------------------------------------- provider list
+
+function renderProviders(): void {
+  const list = el.sdProviderList as HTMLElement | undefined;
+  if (!list) return;
+
+  list.innerHTML = ui.presets
+    .map((preset) => {
+      const on = preset.id === form.provider;
+      const badge = preset.isLocal
+        ? '<span class="sd-chip-mini local">LOKAL</span>'
+        : preset.envVar
+          ? `<span class="sd-chip-mini env">${escapeHtml(preset.envVar)}</span>`
+          : '';
+      const sub = preset.isLocal || preset.id === 'custom' ? escapeHtml(preset.baseUrl || 'base URL diisi manual') : '';
+      return `
+        <button class="sd-radio${on ? ' on' : ''}" type="button" role="radio" aria-checked="${on}" data-provider="${preset.id}">
+          <span class="sd-radio-mark">${on ? icon('check', 'ic ic-xs') : ''}</span>
+          <span class="sd-radio-main">
+            <span class="sd-radio-label">${escapeHtml(preset.label)} ${badge}</span>
+            ${sub ? `<span class="sd-radio-sub">${sub}</span>` : ''}
+          </span>
+          <span class="sd-radio-wire">${escapeHtml(preset.wireApi.replace('_', ' '))}</span>
+        </button>`;
+    })
+    .join('');
+
+  list.querySelectorAll<HTMLButtonElement>('[data-provider]').forEach((btn) => {
+    btn.addEventListener('click', () => selectProvider(btn.dataset.provider as ProviderId));
+  });
+
+  const wrap = el.sdCustomWrap as HTMLElement | undefined;
+  if (wrap) wrap.hidden = currentPreset().id !== 'custom';
+  renderWirePills();
+
+  const sub = el.sdProviderSub as HTMLElement | undefined;
+  if (sub) {
+    const preset = currentPreset();
+    sub.textContent = preset.id === 'custom' ? activeBaseUrl() || 'base URL belum diisi' : preset.label;
+  }
+}
+
+/**
+ * Switching provider resets the model and the discovered catalogue, because both
+ * belong to the provider that was just left.
+ */
+function selectProvider(id: ProviderId): void {
+  if (!ui.presets.some((p) => p.id === id) || id === form.provider) return;
+  form.provider = id;
+  form.catalogue = [];
+  form.model = defaultModelFor(id, form.customBaseUrl);
+  (el.sdModel as HTMLInputElement).value = form.model;
+  clearNotice();
+  setTestResult('', '');
+  renderProviders();
+  renderModels();
+  renderKeyBadge();
+}
+
+/** The wire format of a custom gateway, which is not implied by its URL. */
+function renderWirePills(): void {
+  const box = el.sdWirePills as HTMLElement | undefined;
+  if (!box) return;
+  box.innerHTML = WIRE_APIS.map(
+    (wire) => `<button class="sd-pill${wire === form.customWireApi ? ' is-on' : ''}" type="button" role="radio" aria-checked="${
+      wire === form.customWireApi
+    }" data-wire="${wire}">${escapeHtml(WIRE_API_LABEL[wire])}</button>`
+  ).join('');
+  box.querySelectorAll<HTMLButtonElement>('[data-wire]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      form.customWireApi = btn.dataset.wire as WireApi;
+      renderWirePills();
+    });
   });
 }
 
-function fillModelList(provider: ProviderId): void {
-  void bridge.getProviders().then((providers) => {
-    const dl = el.sdModelList as HTMLDataListElement | undefined;
-    if (!dl) return;
-    const models = providers[provider]?.models ?? [];
-    dl.innerHTML = models.map((m) => `<option value="${escapeHtml(m)}"></option>`).join('');
+function renderKeyBadge(): void {
+  const badge = el.sdKeyBadge as HTMLElement | undefined;
+  const sub = el.sdKeySub as HTMLElement | undefined;
+  const note = el.sdKeyNote as HTMLElement | undefined;
+  const clear = el.sdKeyClear as HTMLButtonElement | undefined;
+  if (!badge) return;
+
+  const needed = requiresKey();
+  const saved = form.savedKey !== '';
+
+  badge.hidden = !needed;
+  badge.textContent = saved ? 'KEY SAVED' : 'KEY EMPTY';
+  badge.className = `sd-badge${saved ? ' ok' : ' empty'}`;
+
+  if (sub) {
+    sub.textContent = !needed
+      ? 'provider lokal — tanpa API key'
+      : saved
+        ? `${currentPreset().label} · tersimpan`
+        : `${currentPreset().label} · belum diisi`;
+  }
+  if (clear) clear.hidden = !saved;
+
+  if (note) {
+    note.textContent = ui.keyProtection === 'keychain'
+      ? 'Disimpan terenkripsi lewat keychain sistem (safeStorage) di state.json. Tidak pernah dikirim ke server kami.'
+      : 'Keychain sistem tidak tersedia di mesin ini, jadi key disimpan apa adanya di state.json folder data aplikasi.';
+  }
+}
+
+// --------------------------------------------------------------- model list
+
+function modelCatalogue(): ModelEntry[] {
+  return form.catalogue;
+}
+
+function renderModels(): void {
+  const box = el.sdModelListBox as HTMLElement | undefined;
+  const list = el.sdModelList as HTMLDataListElement | undefined;
+  if (!box) return;
+
+  const preset = currentPreset();
+  const catalogue = modelCatalogue();
+  const entries = new Map(catalogue.map((m) => [m.id, m]));
+  // One pass: every model is ranked against the same peer price set.
+  const economies = economiesFor(catalogue);
+  const ids = rankedModels(catalogue.map((m) => m.id), preset.suggestedModels);
+
+  if (list) list.innerHTML = ids.map((m) => `<option value="${escapeHtml(m)}"></option>`).join('');
+
+  const sub = el.sdModelSub as HTMLElement | undefined;
+  if (sub) sub.textContent = form.model || 'belum dipilih';
+
+  const count = el.sdModelCount as HTMLElement | undefined;
+  if (count) {
+    count.hidden = !catalogue.length;
+    count.textContent = `${catalogue.length} diambil`;
+    count.className = 'sd-badge';
+  }
+
+  const note = el.sdModelNote as HTMLElement | undefined;
+  if (note) {
+    note.textContent = catalogue.length
+      ? 'Harga & konteks dibaca dari /models provider saat ini.'
+      : 'Klik model untuk aktifkan, atau ketik id lalu tekan tambah.';
+  }
+
+  if (!ids.length) {
+    box.innerHTML = `<p class="sd-empty-note">${
+      supportsDiscovery(preset, form.customBaseUrl)
+        ? 'Klik "Ambil daftar model" untuk membaca katalog provider.'
+        : 'Provider ini tidak punya daftar bawaan — ketik id model secara manual.'
+    }</p>`;
+    return;
+  }
+
+  box.innerHTML = ids
+    .map((id) => {
+      const entry = entries.get(id);
+      const on = id === form.model;
+      // Suggested models the provider did not price still get an id estimate.
+      const economy = economies.get(id) ?? estimateEconomy(id);
+      const live = economy.basis === 'LIVE_PRICE';
+      const priceIn = formatPrice(economy.inputPerMTok, live);
+      const priceOut = formatPrice(economy.outputPerMTok, live);
+      const price = priceIn && priceOut ? `${priceIn} / ${priceOut}` : priceIn ?? priceOut;
+      const tier = isBadgeWorthy(economy) ? `<span class="sd-tier ${economy.tier.toLowerCase()}">${tierGlyph(economy.tier)}</span>` : '';
+      const ctx = entry?.contextLength ? ` · ${Math.round(entry.contextLength / 1024)}k ctx` : '';
+      const title = [
+        id,
+        price ? `harga $${price} per juta token` : 'harga tidak dipublikasikan',
+        economy.basis === 'SIZE_ESTIMATE' ? 'perkiraan dari nama model' : economy.basis === 'UNKNOWN' ? '' : '',
+        entry?.contextLength ? `konteks ${entry.contextLength} token` : ''
+      ]
+        .filter(Boolean)
+        .join('\n');
+      return `
+        <button class="sd-model-row${on ? ' on' : ''}" type="button" data-model="${escapeHtml(id)}" title="${escapeHtml(title)}">
+          <span class="sd-radio-mark">${on ? icon('check', 'ic ic-xs') : ''}</span>
+          <span class="sd-model-id">${escapeHtml(id)}</span>
+          <span class="sd-model-meta">${escapeHtml(price ?? '')}${escapeHtml(ctx)}</span>
+          ${tier}
+          ${on ? '<span class="sd-model-active">AKTIF</span>' : ''}
+        </button>`;
+    })
+    .join('');
+
+  box.querySelectorAll<HTMLButtonElement>('[data-model]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      form.model = btn.dataset.model ?? '';
+      (el.sdModel as HTMLInputElement).value = form.model;
+      form.keyDirty = false;
+      clearNotice();
+      renderModels();
+      syncManualModelState();
+    });
   });
 }
 
-function openSettings(): void {
-  const c = ui.config;
-  (el.sdProvider as HTMLSelectElement).value = c.provider;
-  (el.sdBaseUrl as HTMLInputElement).value = c.baseUrl;
-  (el.sdApiKey as HTMLInputElement).value = c.apiKey;
-  (el.sdModel as HTMLInputElement).value = c.model;
-  (el.sdMaxTokens as HTMLInputElement).value = String(c.maxTokens);
-  (el.sdTemp as HTMLInputElement).value = String(c.temperature);
-  (el.sdSystem as HTMLTextAreaElement).value = c.system;
-  el.sdTestResult.textContent = '';
-  el.sdTestResult.className = 'sd-test-result';
-  fillModelList(c.provider);
-  el.sdSettings.classList.add('open');
-  setTimeout(() => (el.sdModel as HTMLInputElement).focus(), 30);
+function syncManualModelState(): void {
+  const manual = (el.sdModel as HTMLInputElement | undefined)?.value.trim() ?? '';
+  const add = el.sdModelAdd as HTMLButtonElement | undefined;
+  if (add) add.hidden = !manual || manual === form.model;
 }
 
-function closeSettings(): void {
-  el.sdSettings.classList.remove('open');
-}
+// ------------------------------------------------------------------ actions
 
-async function saveSettings(): Promise<void> {
-  const patch: Partial<AppConfig> = {
-    provider: (el.sdProvider as HTMLSelectElement).value as ProviderId,
-    baseUrl: (el.sdBaseUrl as HTMLInputElement).value.trim(),
-    apiKey: (el.sdApiKey as HTMLInputElement).value.trim(),
-    model: (el.sdModel as HTMLInputElement).value.trim(),
+function readForm(): Partial<AppConfig> {
+  return {
+    provider: form.provider,
+    customBaseUrl: form.customBaseUrl,
+    customWireApi: form.customWireApi,
+    apiKey: form.apiKey,
+    model: form.model,
     maxTokens: Number((el.sdMaxTokens as HTMLInputElement).value),
     temperature: Number((el.sdTemp as HTMLInputElement).value),
     system: (el.sdSystem as HTMLTextAreaElement).value
   };
+}
+
+async function saveSettings(): Promise<void> {
+  if (settingsBusy()) return;
+  const preset = currentPreset();
+  if (preset.id === 'custom' && !activeBaseUrl()) {
+    notice('bad', 'Base URL gateway kustom masih kosong.');
+    setTestResult('', '');
+    return;
+  }
+
+  setBusy('save', 'menyimpan…');
   try {
-    const state = await bridge.saveConfig(patch);
+    const state = await bridge.saveConfig(readForm());
     ui.config = state.config;
     ui.sessions = state.sessions;
     ui.activeSessionId = state.activeSessionId;
-    // reflect provider normalisation (base URL / api mode) back into the form
-    (el.sdBaseUrl as HTMLInputElement).value = state.config.baseUrl;
+    ui.keyProtection = state.keyProtection;
+    // Normalisation happens in the main process; adopt what it decided.
+    form.savedKey = state.config.apiKey;
+    form.apiKey = state.config.apiKey;
+    form.customBaseUrl = state.config.customBaseUrl;
+    form.customWireApi = state.config.customWireApi;
+    form.model = state.config.model;
+    form.keyDirty = false;
+    (el.sdCustomBaseUrl as HTMLInputElement).value = state.config.customBaseUrl;
+    (el.sdApiKey as HTMLInputElement).value = state.config.apiKey;
     (el.sdModel as HTMLInputElement).value = state.config.model;
+    (el.sdMaxTokens as HTMLInputElement).value = String(state.config.maxTokens);
+    (el.sdTemp as HTMLInputElement).value = String(state.config.temperature);
+    renderProviders();
+    renderModels();
+    renderKeyBadge();
+    setTestResult('✔ Pengaturan tersimpan', 'ok');
+    toast('Pengaturan disimpan', 'ok');
     closeSettings();
     renderHeader();
     renderSessions();
-    toast('Pengaturan disimpan', 'ok');
   } catch (err) {
-    toast(`Gagal menyimpan: ${messageOf(err)}`, 'bad');
+    notice('bad', `Gagal menyimpan: ${messageOf(err)}`);
+    setTestResult(`✘ ${messageOf(err)}`, 'bad');
+  } finally {
+    setBusy(null);
   }
 }
 
 async function testConnection(): Promise<void> {
-  const btn = el.sdTest as HTMLButtonElement;
-  const out = el.sdTestResult;
-  btn.disabled = true;
-  btn.textContent = 'Menguji…';
-  out.textContent = '';
-  out.className = 'sd-test-result';
+  if (settingsBusy()) return;
+  if (requiresKey() && !form.apiKey.trim()) {
+    notice('warn', 'Isi API key dulu, atau pilih provider lokal.');
+    setTestResult('', '');
+    return;
+  }
+  const preset = currentPreset();
+  if (preset.id === 'custom' && !activeBaseUrl()) {
+    notice('bad', 'Base URL gateway kustom masih kosong.');
+    setTestResult('', '');
+    return;
+  }
+
+  setBusy('test', 'menguji…');
+  setTestResult('', '');
+  clearNotice();
+  const test = el.sdTest as HTMLButtonElement | undefined;
+  if (test) test.innerHTML = `<span class="sd-spin">${icon('spinner', 'ic ic-sm')}</span> Menguji…`;
+
   try {
     const res = await bridge.testConnection({
-      provider: (el.sdProvider as HTMLSelectElement).value as ProviderId,
-      baseUrl: (el.sdBaseUrl as HTMLInputElement).value.trim(),
-      apiKey: (el.sdApiKey as HTMLInputElement).value.trim(),
-      model: (el.sdModel as HTMLInputElement).value.trim()
+      provider: form.provider,
+      customBaseUrl: form.customBaseUrl,
+      customWireApi: form.customWireApi,
+      apiKey: form.apiKey,
+      model: form.model
     });
-    out.textContent = `${res.ok ? '✔' : '✘'} ${res.message}`;
-    out.className = `sd-test-result ${res.ok ? 'ok' : 'bad'}`;
-    toast(res.ok ? 'Koneksi berhasil' : 'Koneksi gagal', res.ok ? 'ok' : 'bad');
+    setTestResult(`${res.ok ? '✔' : '✘'} ${res.message}`, res.ok ? 'ok' : 'bad');
+
+    if (res.ok) {
+      notice('ok', `Koneksi berhasil ke ${preset.label}.`);
+      return;
+    }
+    switch (res.kind) {
+      case 'AUTH':
+        notice('bad', `API key ditolak. ${res.message}`);
+        break;
+      case 'BILLING':
+        notice('billing', `Saldo atau kuota habis. ${res.message}`, 'Buka billing', res.billingUrl ?? undefined);
+        break;
+      case 'RATE_LIMIT':
+        notice('warn', `Rate limit. ${res.message}`);
+        break;
+      case 'MODEL':
+        notice(
+          'warn',
+          res.suggestedModel ? `Model tidak tersedia di key ini. Coba ${res.suggestedModel}.` : `Model ditolak. ${res.message}`,
+          res.suggestedModel ? `Pakai ${res.suggestedModel}` : undefined,
+          undefined
+        );
+        if (res.suggestedModel) el.sdNoticeAction!.dataset.model = res.suggestedModel;
+        break;
+      case 'TIMEOUT':
+        notice('warn', `Koneksi timeout. ${res.message}`);
+        break;
+      case 'NETWORK':
+      case 'TLS':
+        notice('bad', `Tidak bisa menghubungi provider. ${res.message}`);
+        break;
+      case 'SERVER':
+        notice('warn', `Provider sedang bermasalah. ${res.message}`);
+        break;
+      default:
+        notice('bad', res.message);
+    }
   } catch (err) {
-    out.textContent = `✘ ${messageOf(err)}`;
-    out.className = 'sd-test-result bad';
+    setTestResult(`✘ ${messageOf(err)}`, 'bad');
+    notice('bad', messageOf(err));
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Tes Koneksi';
+    if (test) test.innerHTML = `${icon('speed', 'ic ic-sm')} Tes Koneksi`;
+    setBusy(null);
   }
+}
+
+async function fetchModels(): Promise<void> {
+  if (settingsBusy()) return;
+  const preset = currentPreset();
+  if (!supportsDiscovery(preset, form.customBaseUrl)) {
+    notice('bad', 'Base URL gateway kustom masih kosong.');
+    return;
+  }
+  if (requiresKey() && !form.apiKey.trim()) {
+    notice('warn', 'Isi API key dulu — katalog provider butuh autentikasi.');
+    return;
+  }
+
+  setBusy('models', 'mengambil model…');
+  clearNotice();
+  const btn = el.sdFetchModels as HTMLButtonElement | undefined;
+  if (btn) btn.innerHTML = `<span class="sd-spin">${icon('spinner', 'ic ic-sm')}</span> Mengambil…`;
+
+  try {
+    const res = await bridge.fetchModels({
+      provider: form.provider,
+      customBaseUrl: form.customBaseUrl,
+      customWireApi: form.customWireApi,
+      apiKey: form.apiKey
+    });
+    if (res.ok) {
+      form.catalogue = res.models;
+      const best = repairModelFor(form.provider, res.models.map((m) => m.id));
+      if (best && !isModelValidFor(form.provider, form.model, res.models.map((m) => m.id), form.customBaseUrl)) {
+        form.model = best;
+        (el.sdModel as HTMLInputElement).value = best;
+        notice('warn', `Model sebelumnya tidak ada di katalog ini, diganti ke ${best}.`);
+      } else {
+        notice('ok', `${res.message}.`);
+      }
+    } else {
+      form.catalogue = [];
+      if (res.kind === 'BILLING' && res.billingUrl) {
+        notice('billing', `Gagal ambil katalog: ${res.message}`, 'Buka billing', res.billingUrl);
+      } else {
+        notice('bad', `Gagal ambil katalog: ${res.message}`);
+      }
+    }
+    renderModels();
+  } catch (err) {
+    notice('bad', messageOf(err));
+  } finally {
+    if (btn) btn.innerHTML = `${icon('refresh', 'ic ic-sm')} Ambil daftar model`;
+    setBusy(null);
+  }
+}
+
+function applyModel(id: string): void {
+  form.model = id;
+  (el.sdModel as HTMLInputElement).value = id;
+  renderModels();
+}
+
+function applyThemeButtons(): void {
+  const dark = document.body.classList.contains('dark');
+  const light = el.sdThemeLight as HTMLButtonElement | undefined;
+  const darkBtn = el.sdThemeDark as HTMLButtonElement | undefined;
+  if (light) light.classList.toggle('is-on', !dark);
+  if (darkBtn) darkBtn.classList.toggle('is-on', dark);
+  const sub = el.sdThemeSub as HTMLElement | undefined;
+  if (sub) sub.textContent = dark ? 'Tema gelap' : 'Tema terang';
+}
+
+function syncModeButtons(): void {
+  const dev = el.sdModeDev as HTMLButtonElement | undefined;
+  const plan = el.sdModePlan as HTMLButtonElement | undefined;
+  if (dev) dev.classList.toggle('is-on', ui.workspaceMode === 'dev');
+  if (plan) plan.classList.toggle('is-on', ui.workspaceMode === 'plan');
+}
+
+async function openSettings(): Promise<void> {
+  const c = ui.config;
+  form.provider = c.provider;
+  form.customBaseUrl = c.customBaseUrl;
+  form.customWireApi = c.customWireApi;
+  form.apiKey = c.apiKey;
+  form.savedKey = c.apiKey;
+  form.keyDirty = false;
+  form.keyVisible = false;
+  form.model = c.model;
+  form.catalogue = [];
+
+  if (!ui.presets.length) {
+    try {
+      ui.presets = await bridge.getProviders();
+    } catch {
+      ui.presets = [presetFor(c.provider)];
+    }
+  }
+
+  (el.sdCustomBaseUrl as HTMLInputElement).value = c.customBaseUrl;
+  (el.sdApiKey as HTMLInputElement).value = c.apiKey;
+  (el.sdApiKey as HTMLInputElement).type = 'password';
+  (el.sdModel as HTMLInputElement).value = c.model;
+  (el.sdMaxTokens as HTMLInputElement).value = String(c.maxTokens);
+  (el.sdTemp as HTMLInputElement).value = String(c.temperature);
+  (el.sdSystem as HTMLTextAreaElement).value = c.system;
+
+  const protection = el.sdKeyProtection as HTMLElement | undefined;
+  if (protection) protection.textContent = ui.keyProtection === 'keychain' ? 'Keychain aman' : 'Tanpa keychain';
+
+  clearNotice();
+  setTestResult('', '');
+  renderProviders();
+  renderModels();
+  renderKeyBadge();
+  paintMarks(el.sdSettings);
+  syncManualModelState();
+  applyThemeButtons();
+  syncModeButtons();
+  renderUpdateState(el.sdUpdateVersion ? (update.state ?? blankUpdateState()) : blankUpdateState());
+
+  el.sdSettings.classList.add('open');
+  // Always reopen at the top, and take focus without scrolling: a leftover scroll
+  // position would hide the provider section, which is where people start, and
+  // focusing the model field would scroll straight past it.
+  const scroll = el.sdSettings.querySelector('.sd-settings-scroll') as HTMLElement | null;
+  if (scroll) scroll.scrollTop = 0;
+  setTimeout(() => {
+    (el.sdSettings.querySelector('.sd-settings-card') as HTMLElement | null)?.focus({ preventScroll: true });
+    if (scroll) scroll.scrollTop = 0;
+  }, 30);
+}
+
+function closeSettings(): void {
+  if (settingsBusy()) return;
+  el.sdSettings.classList.remove('open');
+}
+
+function blankUpdateState(): UpdatePayload {
+  return { phase: 'unsupported', currentVersion: '—', availableVersion: null, progress: 0, message: null };
 }
 
 /* ------------------------------------------------------------- tool pop -- */
@@ -886,6 +1479,7 @@ async function checkForUpdates(manual: boolean): Promise<void> {
 /* ----------------------------------------------------------------- init -- */
 
 function wireEvents(): void {
+  paintMarks();
   const ta = el.sdInput as HTMLTextAreaElement;
 
   ta.addEventListener('keydown', (e) => {
@@ -947,17 +1541,125 @@ function wireEvents(): void {
 
   (el.sdThemeBtn as HTMLButtonElement).addEventListener('click', () => void toggleTheme());
 
-  (el.sdSettingsBtn as HTMLButtonElement).addEventListener('click', openSettings);
+  /* ----------------------------------------------------------- settings -- */
+
+  (el.sdSettingsBtn as HTMLButtonElement).addEventListener('click', () => void openSettings());
   (el.sdSettingsClose as HTMLButtonElement).addEventListener('click', closeSettings);
-  el.sdSettings.addEventListener('click', (e) => {
-    if (e.target === el.sdSettings) closeSettings();
+
+  // A click on the backdrop must never dismiss the dialog: losing a half-typed
+  // API key because the pointer slipped is the bug this guards against.
+  el.sdSettings.addEventListener('mousedown', (e) => {
+    if (e.target === el.sdSettings) e.preventDefault();
   });
+
   (el.sdSave as HTMLButtonElement).addEventListener('click', () => void saveSettings());
+  (el.sdSaveMain as HTMLButtonElement).addEventListener('click', () => void saveSettings());
   (el.sdTest as HTMLButtonElement).addEventListener('click', () => void testConnection());
-  el.sdProvider.addEventListener('change', applyProviderToForm);
+  (el.sdFetchModels as HTMLButtonElement).addEventListener('click', () => void fetchModels());
+
+  // Collapsible sections: the provider, key and model panels start open.
+  document.querySelectorAll<HTMLElement>('.sd-sec').forEach((sec) => {
+    sec.querySelector('.sd-sec-head')?.addEventListener('click', () => {
+      const open = sec.classList.toggle('open');
+      sec.querySelector('.sd-sec-head')?.setAttribute('aria-expanded', String(open));
+    });
+  });
+
+  (el.sdCustomBaseUrl as HTMLInputElement).addEventListener('input', (e) => {
+    form.customBaseUrl = (e.target as HTMLInputElement).value;
+    renderProviders();
+    renderKeyBadge();
+  });
+
+  (el.sdApiKey as HTMLInputElement).addEventListener('input', (e) => {
+    form.apiKey = (e.target as HTMLInputElement).value;
+    form.keyDirty = true;
+    clearNotice();
+    setTestResult('', '');
+    renderKeyBadge();
+
+    // A pasted key usually identifies its own provider, so switch to it rather
+    // than making the user remember which tab it came from.
+    const guessed = detectProviderForKey(form.apiKey);
+    if (guessed && guessed !== form.provider && ui.presets.some((p) => p.id === guessed)) {
+      selectProvider(guessed);
+      toast(`Key dikenali sebagai ${presetFor(guessed).label}`, 'ok');
+    }
+  });
+
+  (el.sdKeyToggle as HTMLButtonElement).addEventListener('click', () => {
+    form.keyVisible = !form.keyVisible;
+    const input = el.sdApiKey as HTMLInputElement;
+    input.type = form.keyVisible ? 'text' : 'password';
+    const btn = el.sdKeyToggle as HTMLButtonElement;
+    btn.innerHTML = icon(form.keyVisible ? 'eye-off' : 'eye', 'ic ic-sm');
+    btn.setAttribute('aria-label', form.keyVisible ? 'Sembunyikan key' : 'Tampilkan key');
+  });
+
+  (el.sdKeyClear as HTMLButtonElement).addEventListener('click', () => {
+    form.apiKey = '';
+    form.savedKey = '';
+    form.keyDirty = true;
+    (el.sdApiKey as HTMLInputElement).value = '';
+    clearNotice();
+    setTestResult('', '');
+    renderKeyBadge();
+  });
+
+  (el.sdModel as HTMLInputElement).addEventListener('input', syncManualModelState);
+  (el.sdModelAdd as HTMLButtonElement).addEventListener('click', () => {
+    const manual = (el.sdModel as HTMLInputElement).value.trim();
+    if (!manual) return;
+    applyModel(manual);
+    syncManualModelState();
+  });
+
+  (el.sdNoticeAction as HTMLButtonElement).addEventListener('click', () => {
+    const btn = el.sdNoticeAction as HTMLButtonElement;
+    const model = btn.dataset.model;
+    if (model) {
+      delete btn.dataset.model;
+      applyModel(model);
+      toast(`Model diganti ke ${model}`, 'ok');
+      return;
+    }
+    if (noticeUrl) void bridge.openExternal(noticeUrl);
+  });
+
+  (el.sdThemeLight as HTMLButtonElement).addEventListener('click', () => {
+    applyTheme(false);
+    void bridge.setTheme('light');
+    applyThemeButtons();
+  });
+  (el.sdThemeDark as HTMLButtonElement).addEventListener('click', () => {
+    applyTheme(true);
+    void bridge.setTheme('dark');
+    applyThemeButtons();
+  });
+  (el.sdModeDev as HTMLButtonElement).addEventListener('click', () => {
+    ui.workspaceMode = 'dev';
+    void bridge.setMode('dev');
+    syncModeButtons();
+    renderHeader();
+    renderToolChips();
+    renderMessages();
+  });
+  (el.sdModePlan as HTMLButtonElement).addEventListener('click', () => {
+    ui.workspaceMode = 'plan';
+    void bridge.setMode('plan');
+    syncModeButtons();
+    renderHeader();
+    renderToolChips();
+    renderMessages();
+  });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && el.sdSettings.classList.contains('open')) closeSettings();
+    // Escape closes only when the dialog is idle: dismissing mid-request would
+    // hide the result the user is waiting for.
+    if (e.key === 'Escape' && settingsOpen() && !settingsBusy()) {
+      e.preventDefault();
+      closeSettings();
+    }
   });
 
   // external links
@@ -997,7 +1699,7 @@ function wireEvents(): void {
         void pickWorkspace();
         break;
       case 'settings':
-        openSettings();
+        void openSettings();
         break;
       case 'toggle-theme':
         void toggleTheme();
@@ -1038,14 +1740,25 @@ async function init(): Promise<void> {
   } catch {
     applyTheme(false);
   }
+  applyThemeButtons();
+
+  try {
+    ui.presets = await bridge.getProviders();
+  } catch {
+    ui.presets = [];
+  }
 
   await refresh();
   autosize();
   (el.sdInput as HTMLTextAreaElement).focus();
 
-  if (!ui.config.apiKey) {
-    toast('API key belum diatur — buka Pengaturan Model', 'bad');
+  if (!ui.config.apiKey && !isLocalProvider(ui.config.provider)) {
+    toast('API key belum diatur — buka Pengaturan', 'bad');
   }
+}
+
+function isLocalProvider(id: ProviderId): boolean {
+  return presetFor(id).isLocal;
 }
 
 document.addEventListener('DOMContentLoaded', () => {

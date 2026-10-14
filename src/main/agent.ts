@@ -1,10 +1,38 @@
 import { Store } from './store';
 import { executeTool, toolSchemas } from './tools';
-import { streamChat } from './llm/chat';
-import { DEFAULT_SYSTEM } from '../shared/providers';
+import { LlmError, maxTokensCeiling, streamChat } from './llm/chat';
+import { DEFAULT_SYSTEM, repairModelFor } from '../shared/providers';
 import type { ChatMessage, RunEvent, RunStatus, ToolCallRecord, ToolResultRecord } from '../shared/types';
 
 const MAX_ITERATIONS = 12;
+
+/** One line the user can act on, per failure kind. */
+function explain(err: unknown, cfg: ReturnType<Store['getConfig']>): string {
+  if (!(err instanceof LlmError)) return err instanceof Error ? err.message : String(err);
+  const detail = err.message;
+  switch (err.kind) {
+    case 'AUTH':
+      return `**API key ditolak** (${detail}). Cek ulang key di provider yang dipilih.`;
+    case 'BILLING':
+      return `**Saldo/kredit habis** (${detail}). Top up dulu di halaman billing provider.`;
+    case 'RATE_LIMIT':
+      return `**Rate limit** (${detail}). Tunggu sebentar lalu coba lagi.`;
+    case 'MODEL': {
+      const better = repairModelFor(cfg.provider);
+      const hint = better && better !== cfg.model ? ` Coba model \`${better}\`.` : '';
+      return `**Model tidak bisa dipakai** (${detail}).${hint}`;
+    }
+    case 'TIMEOUT':
+      return `**Koneksi timeout** (${detail}). Periksa jaringan atau ganti provider.`;
+    case 'NETWORK':
+    case 'TLS':
+      return `**Tidak bisa menghubungi provider** (${detail}).`;
+    case 'SERVER':
+      return `**Provider sedang bermasalah** (${detail}).`;
+    default:
+      return `**Error:** ${detail}`;
+  }
+}
 
 export interface RunContext {
   store: Store;
@@ -61,22 +89,35 @@ export async function runAgent(ctx: RunContext, sessionId: string, userText: str
       const turnCalls: ToolCallRecord[] = [];
       const turnResults: ToolResultRecord[] = [];
 
-      const result = await streamChat(
-        cfg,
-        apiHistory,
-        schemas,
-        {
-          onText(chunk) {
-            turnText.push(chunk);
-            assistantMessage.text += chunk;
-            emit({ type: 'text', text: chunk });
-          },
-          onToolStart(call) {
-            emit({ type: 'tool_start', id: call.id, name: call.name });
-          }
-        },
-        signal
-      );
+      // A model with a smaller window than the requested budget rejects it by
+      // naming its own ceiling, so the budget is lowered and the turn retried.
+      let tokenBudget = cfg.maxTokens;
+      let result;
+      for (;;) {
+        try {
+          result = await streamChat(
+            { ...cfg, maxTokens: tokenBudget },
+            apiHistory,
+            schemas,
+            {
+              onText(chunk) {
+                turnText.push(chunk);
+                assistantMessage.text += chunk;
+                emit({ type: 'text', text: chunk });
+              },
+              onToolStart(call) {
+                emit({ type: 'tool_start', id: call.id, name: call.name });
+              }
+            },
+            signal
+          );
+          break;
+        } catch (err) {
+          const ceiling = maxTokensCeiling(err instanceof Error ? err.message : '');
+          if (ceiling === null || ceiling >= tokenBudget) throw err;
+          tokenBudget = ceiling;
+        }
+      }
 
       turnCalls.push(...result.toolCalls);
       for (const tc of result.toolCalls) {
@@ -136,9 +177,9 @@ export async function runAgent(ctx: RunContext, sessionId: string, userText: str
       status = 'stopped';
     } else {
       status = 'error';
-      const msg = `**Error:** ${(err as Error).message}`;
-      assistantMessage.text += assistantMessage.text ? `\n\n${msg}` : msg;
-      emit({ type: 'text', text: `\n\n${msg}` });
+      const msg = `\n\n${explain(err, cfg)}`;
+      assistantMessage.text += assistantMessage.text ? msg : msg.trim();
+      emit({ type: 'text', text: msg });
     }
   }
 
@@ -158,4 +199,4 @@ export async function runAgent(ctx: RunContext, sessionId: string, userText: str
 }
 
 /** Prompt used when no API key has been configured yet. */
-export const MISSING_KEY_MESSAGE = `API key belum diatur. Buka **Pengaturan Model** (ikon ⚙ di header), pilih provider, lalu isi API key kamu.\n\nSystem prompt bawaan:\n> ${DEFAULT_SYSTEM}`;
+export const MISSING_KEY_MESSAGE = `API key belum diatur. Buka **Pengaturan** (ikon sliders di header), pilih provider, lalu isi API key kamu.\n\nSystem prompt bawaan:\n> ${DEFAULT_SYSTEM}`;

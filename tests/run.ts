@@ -18,10 +18,43 @@ import {
 import { runCode } from '../src/main/tools/codeRunner';
 import { executeTool, TOOL_NAMES as toolNames } from '../src/main/tools/index';
 import { streamChat } from '../src/main/llm/chat';
+import {
+  authHeaders,
+  buildError,
+  classifyError,
+  isStreamingUnsupported,
+  isToolUnsupported,
+  maxTokensCeiling,
+  shouldRetryWithAlternateParams,
+  streamingBody
+} from '../src/main/llm/chat';
 import { runAgent } from '../src/main/agent';
 import { renderMarkdown } from '../src/renderer/markdown';
-import { normalizeConfig, endpointFor, deriveSessionTitle, PROVIDERS } from '../src/shared/providers';
-import type { AppConfig, ChatMessage, RunEvent, Session } from '../src/shared/types';
+import { economyFor, tierGlyph } from '../src/shared/economy';
+import {
+  DEFAULT_SYSTEM,
+  bestChatModel,
+  chatModelRank,
+  chatUrl,
+  cheapTestModel,
+  defaultConfig,
+  deriveSessionTitle,
+  detectProviderForKey,
+  isLoopback,
+  isModelValidFor,
+  modelsUrl,
+  normalizeBaseUrl,
+  normalizeConfig,
+  parseModelCatalog,
+  presetFor,
+  PRESETS,
+  rankedModels,
+  repairModelFor,
+  resolve,
+  resolveForDiscovery,
+  streamUrl
+} from '../src/shared/providers';
+import type { AppConfig, ChatMessage, ProviderId, RunEvent, Session, WireApi } from '../src/shared/types';
 
 let passed = 0;
 let failed = 0;
@@ -288,24 +321,184 @@ section('markdown renderer');
 
 // -------------------------------------------------------------------- config
 
+section('provider registry');
+{
+  eq('seventeen presets', PRESETS.length, 17);
+  eq('default provider is groq', defaultConfig().provider, 'groq');
+
+  // Base URLs and wire formats are the Android client's, verbatim: a key that
+  // works there has to work here.
+  const expected: Array<[ProviderId, string, WireApi]> = [
+    ['openai', 'https://api.openai.com/v1', 'OPENAI_CHAT'],
+    ['anthropic', 'https://api.anthropic.com/v1', 'ANTHROPIC_MESSAGES'],
+    ['gemini', 'https://generativelanguage.googleapis.com/v1beta', 'GEMINI_CONTENT'],
+    ['groq', 'https://api.groq.com/openai/v1', 'OPENAI_CHAT'],
+    ['deepseek', 'https://api.deepseek.com/v1', 'OPENAI_CHAT'],
+    ['openrouter', 'https://openrouter.ai/api/v1', 'OPENAI_CHAT'],
+    ['together', 'https://api.together.xyz/v1', 'OPENAI_CHAT'],
+    ['fireworks', 'https://api.fireworks.ai/inference/v1', 'OPENAI_CHAT'],
+    ['xai', 'https://api.x.ai/v1', 'OPENAI_CHAT'],
+    ['mistral', 'https://api.mistral.ai/v1', 'OPENAI_CHAT'],
+    ['cerebras', 'https://api.cerebras.ai/v1', 'OPENAI_CHAT'],
+    ['nvidia', 'https://integrate.api.nvidia.com/v1', 'OPENAI_CHAT'],
+    ['sambanova', 'https://api.sambanova.ai/v1', 'OPENAI_CHAT'],
+    ['hyperbolic', 'https://api.hyperbolic.xyz/v1', 'OPENAI_CHAT'],
+    ['novita', 'https://api.novita.ai/v3/openai', 'OPENAI_CHAT'],
+    ['ollama', 'http://127.0.0.1:11434/v1', 'OPENAI_CHAT'],
+    ['custom', '', 'OPENAI_CHAT']
+  ];
+  for (const [id, baseUrl, wireApi] of expected) {
+    const preset = presetFor(id);
+    eq(`${id} base url`, preset.baseUrl, baseUrl);
+    eq(`${id} wire api`, preset.wireApi, wireApi);
+  }
+  check('ollama needs no key', presetFor('ollama').isLocal === true);
+  check('every preset has a billing page or is local', PRESETS.every((p) => p.billingUrl !== null || p.isLocal || p.id === 'custom'));
+}
+
+section('endpoint URLs');
+{
+  const anth = resolve('anthropic', '', 'claude-sonnet-5');
+  eq('anthropic chat url', chatUrl(anth!), 'https://api.anthropic.com/v1/messages');
+  eq('anthropic streams on the same path', streamUrl(anth!), chatUrl(anth!));
+  eq('anthropic models url', modelsUrl(anth!), 'https://api.anthropic.com/v1/models');
+
+  const gem = resolve('gemini', '', 'gemini-2.5-flash');
+  eq('gemini chat url', chatUrl(gem!), 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent');
+  eq('gemini stream url', streamUrl(gem!), 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse');
+  eq('gemini models url', modelsUrl(gem!), 'https://generativelanguage.googleapis.com/v1beta/models');
+
+  const oai = resolve('openai', '', 'gpt-4o-mini');
+  eq('openai chat url', chatUrl(oai!), 'https://api.openai.com/v1/chat/completions');
+  eq('openai stream url is the chat url', streamUrl(oai!), chatUrl(oai!));
+
+  const custom = resolve('custom', 'my.gateway.dev/v1/', 'qwen');
+  eq('custom url adds scheme and trims slash', custom!.baseUrl, 'https://my.gateway.dev/v1');
+  eq('custom chat url', chatUrl(custom!), 'https://my.gateway.dev/v1/chat/completions');
+  check('hosted custom gateway needs a key', custom!.requiresApiKey === true);
+  eq('custom loopback needs no key', resolve('custom', 'http://localhost:11434/v1', 'qwen')!.requiresApiKey, false);
+
+  // A custom gateway can speak any of the three formats; a preset cannot be
+  // redirected, because its base URL belongs to the provider.
+  const anthGateway = resolve('custom', 'http://127.0.0.1:4000/v1', 'claude', true, 'ANTHROPIC_MESSAGES');
+  eq('custom gateway wire format', anthGateway!.wireApi, 'ANTHROPIC_MESSAGES');
+  eq('custom anthropic gateway url', chatUrl(anthGateway!), 'http://127.0.0.1:4000/v1/messages');
+  const gemGateway = resolve('custom', 'http://127.0.0.1:4000/v1', 'gemini-2.5-flash', true, 'GEMINI_CONTENT');
+  eq('custom gemini gateway stream url', streamUrl(gemGateway!), 'http://127.0.0.1:4000/v1/models/gemini-2.5-flash:streamGenerateContent?alt=sse');
+  eq('custom defaults to the OpenAI format', resolve('custom', 'http://x.dev/v1', 'm')!.wireApi, 'OPENAI_CHAT');
+  eq('preset wire format is never overridden', resolve('anthropic', 'http://x.dev/v1', 'm', true, 'GEMINI_CONTENT')!.wireApi, 'ANTHROPIC_MESSAGES');
+  eq('custom ignores images too', resolve('custom', 'http://x.dev/v1', 'm')!.supportsImages, false);
+  check('unresolved without a model', resolve('openai', '', '') === null);
+  eq('discovery does not need a model', resolveForDiscovery('ollama', '')!.modelId, '');
+  eq('local provider needs no key', resolve('ollama', '', 'llama3.2')!.requiresApiKey, false);
+}
+
+section('url + key helpers');
+{
+  eq('scheme added', normalizeBaseUrl('api.anthropic.com'), 'https://api.anthropic.com');
+  eq('http preserved', normalizeBaseUrl('HTTP://localhost:11434/v1'), 'http://localhost:11434/v1');
+  eq('trailing slashes trimmed', normalizeBaseUrl('https://x.dev/v1///'), 'https://x.dev/v1');
+  eq('blank stays blank', normalizeBaseUrl('   '), '');
+
+  check('localhost is loopback', isLoopback('http://localhost:11434/v1'));
+  check('127.0.0.1 is loopback', isLoopback('https://127.0.0.1:443'));
+  check('*.local is loopback', isLoopback('http://nas.local/v1'));
+  check('a public host is not loopback', !isLoopback('https://api.openai.com/v1'));
+
+  eq('anthropic key prefix', detectProviderForKey('sk-ant-abc'), 'anthropic');
+  eq('groq key prefix', detectProviderForKey('gsk_abc'), 'groq');
+  eq('gemini key prefix', detectProviderForKey('AIzaSyABC'), 'gemini');
+  eq('openrouter key prefix', detectProviderForKey('sk-or-abc'), 'openrouter');
+  eq('xai key prefix', detectProviderForKey('xai-abc'), 'xai');
+  eq('cerebras key prefix', detectProviderForKey('csk-abc'), 'cerebras');
+  eq('openai key prefix', detectProviderForKey('sk-abc'), 'openai');
+  eq('unknown prefix', detectProviderForKey('nope-abc'), null);
+  eq('blank key', detectProviderForKey('  '), null);
+}
+
+section('model catalogue parsing');
+{
+  const openaiStyle = parseModelCatalog(
+    JSON.stringify({
+      object: 'list',
+      data: [
+        { id: 'gpt-4o', context_length: 128000, pricing: { prompt: '0.0000025', completion: '0.00001' } },
+        { id: 'whisper-1', pricing: { prompt: '0.0000001', completion: '0.0000001' } }
+      ]
+    })
+  );
+  eq('catalogue size', openaiStyle.length, 2);
+  eq('model id', openaiStyle[0].id, 'gpt-4o');
+  eq('input price is per million', openaiStyle[0].inputPerMTok, 2.5);
+  eq('output price is per million', openaiStyle[0].outputPerMTok, 10);
+  eq('context length', openaiStyle[0].contextLength, 128000);
+
+  const geminiStyle = parseModelCatalog(JSON.stringify({ models: [{ name: 'models/gemini-2.5-flash' }] }));
+  eq('gemini name prefix stripped', geminiStyle[0].id, 'gemini-2.5-flash');
+  eq('missing pricing stays null', geminiStyle[0].inputPerMTok, null);
+  eq('missing context stays null', geminiStyle[0].contextLength, null);
+
+  eq('bad json yields nothing', parseModelCatalog('not json').length, 0);
+  eq('wrong shape yields nothing', parseModelCatalog('{"foo":1}').length, 0);
+  eq('negative price ignored', parseModelCatalog('{"data":[{"id":"m","pricing":{"prompt":"-1"}}]}')[0].inputPerMTok, null);
+}
+
+section('model ranking');
+{
+  eq('whisper is never a chat model', chatModelRank('whisper-large-v3'), 0);
+  eq('embedding is never a chat model', chatModelRank('text-embedding-3-large'), 0);
+  check('70b outranks 8b', chatModelRank('llama-3.3-70b-versatile') > chatModelRank('llama-3.1-8b-instant'));
+  check('gemini ranks', chatModelRank('gemini-2.5-flash') > 0);
+
+  eq('best chat model', bestChatModel(['whisper-1', 'llama-3.1-8b-instant', 'llama-3.3-70b-versatile']), 'llama-3.3-70b-versatile');
+  eq('best chat model ignores noise', bestChatModel(['whisper-1']), null);
+
+  const ranked = rankedModels(['gpt-4o', 'whisper-1'], ['gpt-4o-mini']);
+  eq('discovered chat models first', ranked[0], 'gpt-4o');
+  eq('suggestions come next', ranked[1], 'gpt-4o-mini');
+  eq('unusable models stay reachable', ranked[2], 'whisper-1');
+
+  eq('repair prefers the account catalogue', repairModelFor('openai', ['gpt-4.1']), 'gpt-4.1');
+  eq('repair falls back to suggestions', repairModelFor('openai', []), 'gpt-4o');
+  // An unknown id falls back to the default preset, matching the provider picker.
+  eq('unknown provider inherits the default preset', repairModelFor('nope', []), presetFor('groq').suggestedModels[0]);
+
+  const curated = ['gpt-4o-mini', 'gpt-4o'];
+  eq('curated test model trusted when visible', cheapTestModel('openai', curated), 'gpt-4o-mini');
+  eq('cheap hint wins for openrouter', cheapTestModel('openrouter', ['expensive-large', 'gpt-4o-mini']), 'gpt-4o-mini');
+  // Nothing chat-shaped on offer, so the curated pick is probed rather than a
+  // speech-to-text model that would report a dead key on a working one.
+  eq('non-chat entries are never probed', cheapTestModel('groq', ['whisper-large-v3']), 'llama-3.1-8b-instant');
+  eq('curated id ignored when the account cannot see it', cheapTestModel('openai', ['gpt-4o']), 'gpt-4o');
+  eq('provider without a curated pick', cheapTestModel('novita', []), null);
+
+  check('local tag rejected for hosted providers', !isModelValidFor('openai', 'llama3.2:8b'));
+  check('local tag fine for local gateway', isModelValidFor('ollama', 'llama3.2:8b'));
+  check('local tag fine on a loopback custom gateway', isModelValidFor('custom', 'llama3.2:8b', [], 'http://localhost:11434/v1'));
+  check('discovered model always valid', isModelValidFor('openai', 'brand-new', ['brand-new']));
+}
+
 section('config normalisation');
 {
-  const a = normalizeConfig({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4-5' });
-  eq('anthropic base url drops /v1', a.baseUrl, 'https://api.anthropic.com');
-  eq('anthropic endpoint', endpointFor(a), 'https://api.anthropic.com/v1/messages');
-  const o = normalizeConfig({ provider: 'openai', baseUrl: 'https://api.openai.com', model: 'gpt-5' });
-  eq('openai base url adds /v1', o.baseUrl, 'https://api.openai.com/v1');
-  eq('openai endpoint', endpointFor(o), 'https://api.openai.com/v1/chat/completions');
-  const g = normalizeConfig({ provider: 'groq', baseUrl: 'https://api.groq.com/openai/v1' });
-  eq('groq endpoint', endpointFor(g), 'https://api.groq.com/openai/v1/chat/completions');
-  const custom = normalizeConfig({ provider: 'custom', baseUrl: 'http://localhost:1234/v1/' });
-  eq('custom trailing slash trimmed', custom.baseUrl, 'http://localhost:1234/v1');
-  const clamped = normalizeConfig({ provider: 'anthropic', baseUrl: 'x', maxTokens: 5, temperature: 99 });
-  eq('maxTokens clamped', clamped.maxTokens, 128);
+  const a = normalizeConfig({ provider: 'anthropic', model: 'claude-sonnet-5' });
+  eq('a preset provider keeps no custom base url', a.customBaseUrl, '');
+  eq('anthropic endpoint', chatUrl(resolve('anthropic', '', a.model)!), 'https://api.anthropic.com/v1/messages');
+
+  const custom = normalizeConfig({ provider: 'custom', customBaseUrl: 'http://localhost:1234/v1/' });
+  eq('custom trailing slash trimmed', custom.customBaseUrl, 'http://localhost:1234/v1');
+  eq('custom model falls back to default', custom.model, '');
+
+  const clamped = normalizeConfig({ provider: 'groq', maxTokens: 99_999, temperature: 99 });
+  eq('maxTokens clamped to the wire ceiling', clamped.maxTokens, 4096);
   eq('temperature clamped', clamped.temperature, 2);
-  const nan = normalizeConfig({ provider: 'anthropic', baseUrl: 'x', maxTokens: Number.NaN });
-  eq('NaN maxTokens falls back', nan.maxTokens, 4096);
-  eq('five providers', Object.keys(PROVIDERS).length, 5);
+  eq('NaN maxTokens falls back', normalizeConfig({ provider: 'groq', maxTokens: Number.NaN }).maxTokens, 2048);
+  eq('unknown provider falls back to the default', normalizeConfig({ provider: 'nope' as ProviderId }).provider, 'groq');
+  eq('default system prompt kept', normalizeConfig({ provider: 'groq', system: '' }).system, DEFAULT_SYSTEM);
+  eq('custom wire format defaults', normalizeConfig({ provider: 'groq' }).customWireApi, 'OPENAI_CHAT');
+  eq('custom wire format kept', normalizeConfig({ provider: 'groq', customWireApi: 'GEMINI_CONTENT' }).customWireApi, 'GEMINI_CONTENT');
+  eq('bogus wire format rejected', normalizeConfig({ provider: 'groq', customWireApi: 'NOPE' as WireApi }).customWireApi, 'OPENAI_CHAT');
+  eq('custom system prompt kept', normalizeConfig({ provider: 'groq', system: 'hi' }).system, 'hi');
+
   eq('title derived from first user message', deriveSessionTitle([{ role: 'assistant', text: 'x' }, { role: 'user', text: '  halo\n  dunia  ' }]), 'halo dunia');
   eq('title derived is length-capped', deriveSessionTitle([{ role: 'user', text: 'z'.repeat(120) }])?.length, 60);
   eq('title null when no user message', deriveSessionTitle([{ role: 'assistant', text: 'x' }]), null);
@@ -326,7 +519,6 @@ function sseResponse(chunks: string[]): Response {
 
 const baseConfig: AppConfig = normalizeConfig({
   provider: 'anthropic',
-  baseUrl: 'https://api.anthropic.com',
   apiKey: 'k',
   model: 'm',
   system: 'sys'
@@ -368,7 +560,7 @@ section('stream parsing');
     eq('anthropic tool_use stop reason', res2.stopReason, 'tool_use');
 
     // OpenAI SSE with split tool_call deltas
-    const openaiCfg = normalizeConfig({ provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-5', system: 'sys' });
+    const openaiCfg = normalizeConfig({ provider: 'openai', apiKey: 'k', model: 'gpt-5', system: 'sys' });
     globalThis.fetch = async () =>
       sseResponse([
         'data: {"choices":[{"delta":{"role":"assistant","content":"Hi"}}]}\n\n',
@@ -407,7 +599,7 @@ section('agent loop (end-to-end with mock provider)');
     await withTempDir(async (root) => {
       await fs.writeFile(join(root, 'hello.js'), 'export default 1;\n');
 
-      const cfg = normalizeConfig({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com', apiKey: 'k', model: 'm', system: 'sys' });
+      const cfg = normalizeConfig({ provider: 'anthropic', apiKey: 'k', model: 'm', system: 'sys' });
       const session: Session = { id: 's1', title: 'Percakapan baru', model: 'm', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
       let touched = 0;
       let flushed = 0;
@@ -468,7 +660,7 @@ section('agent loop (end-to-end with mock provider)');
 
     // error path
     await withTempDir(async (root) => {
-      const cfg = normalizeConfig({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com', apiKey: 'k', model: 'm', system: 's' });
+      const cfg = normalizeConfig({ provider: 'anthropic', apiKey: 'k', model: 'm', system: 's' });
       const session: Session = { id: 's2', title: 't', model: 'm', messages: [], createdAt: 1, updatedAt: 1 };
       const store = { getConfig: () => cfg, getWorkspaceRoot: () => root, getMode: () => 'dev' as const, getSession: () => session, touch: () => undefined, flush: async () => undefined };
       globalThis.fetch = async () => new Response('nope', { status: 500, statusText: 'Server Error' });
@@ -479,7 +671,7 @@ section('agent loop (end-to-end with mock provider)');
 
     // abort path
     await withTempDir(async (root) => {
-      const cfg = normalizeConfig({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com', apiKey: 'k', model: 'm', system: 's' });
+      const cfg = normalizeConfig({ provider: 'anthropic', apiKey: 'k', model: 'm', system: 's' });
       const session: Session = { id: 's3', title: 't', model: 'm', messages: [], createdAt: 1, updatedAt: 1 };
       const store = { getConfig: () => cfg, getWorkspaceRoot: () => root, getMode: () => 'dev' as const, getSession: () => session, touch: () => undefined, flush: async () => undefined };
       globalThis.fetch = async () => sseResponse([
@@ -494,7 +686,7 @@ section('agent loop (end-to-end with mock provider)');
 
     // plan mode must not execute tools
     await withTempDir(async (root) => {
-      const cfg = normalizeConfig({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com', apiKey: 'k', model: 'm', system: 's' });
+      const cfg = normalizeConfig({ provider: 'anthropic', apiKey: 'k', model: 'm', system: 's' });
       const session: Session = { id: 's4', title: 't', model: 'm', messages: [], createdAt: 1, updatedAt: 1 };
       const store = { getConfig: () => cfg, getWorkspaceRoot: () => root, getMode: () => 'plan' as const, getSession: () => session, touch: () => undefined, flush: async () => undefined };
       let calls = 0;
@@ -527,7 +719,7 @@ section('request body shape');
       captured = { url: String(_url), init, body: JSON.parse(init.body) };
       return sseResponse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', 'data: [DONE]\n\n']);
     };
-    const cfg = normalizeConfig({ provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'secret', model: 'gpt-5', system: 'SYS' });
+    const cfg = normalizeConfig({ provider: 'openai', apiKey: 'secret', model: 'gpt-5', system: 'SYS' });
     const history: ChatMessage[] = [
       { role: 'user', text: 'q1' },
       { role: 'assistant', text: '', tool_calls: [{ id: 'c1', name: 'list_dir', arguments: { path: '.' } }] },
@@ -568,7 +760,7 @@ section('tool results follow the assistant turn (agent shape)');
       openai = JSON.parse(init.body);
       return sseResponse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', 'data: [DONE]\n\n']);
     };
-    const cfg = normalizeConfig({ provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'secret', model: 'gpt-5', system: 'SYS' });
+    const cfg = normalizeConfig({ provider: 'openai', apiKey: 'secret', model: 'gpt-5', system: 'SYS' });
     await streamChat(cfg, agentHistory(), [], { onText: () => undefined, onToolStart: () => undefined }, new AbortController().signal);
     const openaiMsgs = openai.messages.filter((m: any) => m.role !== 'system');
     eq('openai assistant before tool', openaiMsgs[1].role, 'assistant');
@@ -585,7 +777,7 @@ section('tool results follow the assistant turn (agent shape)');
         'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n'
       ]);
     };
-    const acfg = normalizeConfig({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com', apiKey: 'secret', model: 'claude-sonnet-4-5', system: 'SYS' });
+    const acfg = normalizeConfig({ provider: 'anthropic', apiKey: 'secret', model: 'claude-sonnet-5', system: 'SYS' });
     await streamChat(acfg, agentHistory(), [], { onText: () => undefined, onToolStart: () => undefined }, new AbortController().signal);
     eq('anthropic starts with user', anthropic.messages[0].role, 'user');
     eq('anthropic assistant turn', anthropic.messages[1].role, 'assistant');
@@ -606,6 +798,209 @@ section('tool results follow the assistant turn (agent shape)');
     };
     await streamChat(acfg, [...agentHistory(), { role: 'user', text: 'lanjut' }], [], { onText: () => undefined, onToolStart: () => undefined }, new AbortController().signal);
     eq('anthropic merges follow-up into user turn', merged.messages[2].content.length, 2);
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+// ------------------------------------------------------------------- Gemini
+
+section('gemini wire format');
+{
+  const original = globalThis.fetch;
+  try {
+    let url = '';
+    let sent: any = null;
+    globalThis.fetch = async (u: any, init: any) => {
+      url = String(u);
+      sent = JSON.parse(init.body);
+      return sseResponse([
+        'data: {"candidates":[{"content":{"parts":[{"text":"Halo"}]}}]}\n\n',
+        'data: {"candidates":[{"content":{"parts":[{"text":" dunia"}]}}]}\n\n',
+        'data: {"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":3}}\n\n'
+      ]);
+    };
+    const gcfg = normalizeConfig({ provider: 'gemini', apiKey: 'AIzaKey', model: 'gemini-2.5-flash', system: 'SYS' });
+    let acc = '';
+    let usage: any = null;
+    const res = await streamChat(gcfg, [{ role: 'user', text: 'hi' }], [], {
+      onText: (c) => (acc += c),
+      onToolStart: () => undefined,
+      onUsage: (u) => (usage = u)
+    }, new AbortController().signal);
+
+    check('gemini streams from the streamGenerateContent path', url.includes(':streamGenerateContent?alt=sse'), url);
+    eq('gemini auth header', authHeaders('GEMINI_CONTENT', 'AIzaKey')['x-goog-api-key'], 'AIzaKey');
+    eq('gemini body has contents', sent.contents.length, 1);
+    eq('gemini user turn role', sent.contents[0].role, 'user');
+    eq('gemini system_instruction', sent.system_instruction.parts[0].text, 'SYS');
+    eq('gemini generationConfig', sent.generationConfig.maxOutputTokens, 2048);
+    check('gemini body never carries stream', sent.stream === undefined, JSON.stringify(sent.stream));
+    eq('gemini text assembled', acc, 'Halo dunia');
+    eq('gemini stop reason', res.stopReason, 'STOP');
+    eq('gemini usage prompt tokens', usage.promptTokens, 9);
+    eq('gemini usage completion tokens', usage.completionTokens, 3);
+
+    // tool call + functionResponse round trip
+    sent = null;
+    globalThis.fetch = async (_u: any, init: any) => {
+      sent = JSON.parse(init.body);
+      return sseResponse([
+        'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"list_dir","args":{"path":"src"}}}]}}]}\n\n'
+      ]);
+    };
+    const toolCfg = normalizeConfig({ provider: 'gemini', apiKey: 'AIzaKey', model: 'gemini-2.5-flash' });
+    const res2 = await streamChat(toolCfg, [
+      { role: 'user', text: 'q' },
+      { role: 'assistant', text: '', tool_calls: [{ id: 'g0', name: 'list_dir', arguments: { path: 'src' } }] },
+      { role: 'assistant', text: '', tool_results: [{ tool_call_id: 'g0', name: 'list_dir', content: 'app.js' }] }
+    ], [{ name: 'list_dir', description: 'd', input_schema: { type: 'object', properties: {} } }], { onText: () => undefined, onToolStart: () => undefined }, new AbortController().signal);
+
+    eq('gemini tool call name', res2.toolCalls[0]?.name, 'list_dir');
+    eq('gemini tool call args', JSON.stringify(res2.toolCalls[0]?.arguments), '{"path":"src"}');
+    eq('gemini assistant turn becomes model', sent.contents[1].role, 'model');
+    eq('gemini declares tools via functionDeclarations', sent.tools[0].functionDeclarations[0].name, 'list_dir');
+    eq('gemini tool result is a user turn', sent.contents[2].role, 'user');
+    eq('gemini functionResponse name', sent.contents[2].parts[0].functionResponse.name, 'list_dir');
+    eq('gemini functionResponse payload', sent.contents[2].parts[0].functionResponse.response.result, 'app.js');
+
+    // a non-SSE 200 is still readable (a proxy that ignored `stream`)
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'plain' }] }, finishReason: 'STOP' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    let plainAcc = '';
+    const res3 = await streamChat(gcfg, [{ role: 'user', text: 'hi' }], [], { onText: (c) => (plainAcc += c), onToolStart: () => undefined }, new AbortController().signal);
+    eq('non-SSE gemini body is read', plainAcc, 'plain');
+    eq('non-SSE gemini stop reason', res3.stopReason, 'STOP');
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+// -------------------------------------------------------------- error taxonomy
+
+section('error classification');
+{
+  eq('402 is billing', classifyError(402, 'payment required'), 'BILLING');
+  eq('429 quota is billing', classifyError(429, 'You exceeded your quota'), 'BILLING');
+  eq('429 plain is a rate limit', classifyError(429, 'slow down'), 'RATE_LIMIT');
+  eq('401 is auth', classifyError(401, 'invalid api key'), 'AUTH');
+  eq('403 is auth', classifyError(403, 'forbidden'), 'AUTH');
+  eq('404 unknown model is a model error', classifyError(404, 'model not found'), 'MODEL');
+  eq('410 retired model is a model error', classifyError(410, 'reached its end of life'), 'MODEL');
+  eq('access refusal is a model error, not auth', classifyError(403, 'you do not have access to this model'), 'MODEL');
+  eq('nvidia templating failure is a model error', classifyError(400, 'failed to template request: failed to render text output'), 'MODEL');
+  eq('free-tier chat refusal is a model error', classifyError(400, 'Multiturn chat is not enabled for this model'), 'MODEL');
+  eq('400 quota wording is billing', classifyError(400, 'insufficient credits'), 'BILLING');
+  eq('5xx is server', classifyError(503, 'unavailable'), 'SERVER');
+  eq('unrecognised 400 is unknown', classifyError(400, 'something odd'), 'UNKNOWN');
+}
+
+section('error message reading');
+{
+  eq('nested message', buildError('{"error":{"message":"max_tokens must be less than or equal to 512"}}'), 'max_tokens must be less than or equal to 512');
+  eq('string error', buildError('{"error":"invalid key"}'), 'invalid key');
+  eq('top-level message', buildError('{"message":"nope"}'), 'nope');
+  eq('html body is discarded', buildError('<html>oops</html>'), 'Kesonakan tidak diketahui');
+  eq('empty object is discarded', buildError('{}'), 'Kesonakan tidak diketahui');
+  eq('plain body passes through', buildError('Connection reset'), 'Connection reset');
+  eq('detail is truncated to 200', buildError(`{"error":{"message":"${'x'.repeat(400)}"}}`).length, 200);
+}
+
+section('self-healing triggers');
+{
+  eq('token ceiling read', maxTokensCeiling('max_tokens must be less than or equal to 512'), 512);
+  eq('token ceiling absent', maxTokensCeiling('invalid api key'), null);
+
+  check('streaming refusal detected', isStreamingUnsupported('This model does not support streaming'));
+  check('an unrelated failure is not a streaming refusal', !isStreamingUnsupported('invalid api key'));
+
+  check('retired parameter detected', shouldRetryWithAlternateParams('Unsupported value: max_tokens is not supported'));
+  check('temperature-only refusal detected', shouldRetryWithAlternateParams('Unsupported_value: temperature does not support 0.6'));
+  check('unrelated failure is not a parameter retry', !shouldRetryWithAlternateParams('invalid api key'));
+
+  check('tool refusal detected', isToolUnsupported('tools is not supported by this model'));
+  check('an unrelated failure is not a tool refusal', !isToolUnsupported('invalid api key'));
+
+  eq('openai bodies carry stream', streamingBody('OPENAI_CHAT', { a: 1 }).stream, true);
+  eq('anthropic bodies carry stream', streamingBody('ANTHROPIC_MESSAGES', { a: 1 }).stream, true);
+  check('gemini bodies never carry stream', streamingBody('GEMINI_CONTENT', { a: 1 }).stream === undefined);
+}
+
+section('auth headers');
+{
+  eq('openai bearer', authHeaders('OPENAI_CHAT', 'k').Authorization, 'Bearer k');
+  eq('anthropic version pinned', authHeaders('ANTHROPIC_MESSAGES', 'k')['anthropic-version'], '2023-06-01');
+  eq('anthropic key header', authHeaders('ANTHROPIC_MESSAGES', 'k')['x-api-key'], 'k');
+  eq('gemini key header', authHeaders('GEMINI_CONTENT', 'k')['x-goog-api-key'], 'k');
+  eq('blank key sends nothing', Object.keys(authHeaders('OPENAI_CHAT', '   ')).length, 0);
+}
+
+// ------------------------------------------------------------------- economy
+
+section('model economy');
+{
+  eq('a dated id carries no size', economyFor('claude-haiku-4-5-20251001', []).approxParamsB, null);
+  eq('a size in the id is read', economyFor('llama-3.3-70b-versatile', []).approxParamsB, 70);
+  eq('a 70b model is heavy', economyFor('llama-3.3-70b-versatile', []).tier, 'HEAVY');
+  eq('an 8b model is cheap', economyFor('llama-3.1-8b-instant', []).tier, 'CHEAP');
+  eq('the mini family is cheap', economyFor('gpt-4o-mini', []).tier, 'CHEAP');
+  eq('an unknown id stays unknown', economyFor('something-new', []).tier, 'UNKNOWN');
+  eq('tier glyphs', `${tierGlyph('CHEAP')}|${tierGlyph('MID')}|${tierGlyph('HEAVY')}`, '$|$$|$$$');
+
+  // A published price outranks the name heuristic, ranked against the peers of
+  // the same provider rather than a fixed threshold.
+  const priced = [
+    { id: 'cheap-model', inputPerMTok: 0.1, outputPerMTok: 0.1, contextLength: null },
+    { id: 'mid-model', inputPerMTok: 1, outputPerMTok: 1, contextLength: null },
+    { id: 'dear-model', inputPerMTok: 30, outputPerMTok: 30, contextLength: null }
+  ];
+  const cheap = economyFor('cheap-model', priced);
+  eq('live price basis', cheap.basis, 'LIVE_PRICE');
+  eq('live cheap tier', cheap.tier, 'CHEAP');
+  eq('live mid tier', economyFor('mid-model', priced).tier, 'MID');
+  eq('live heavy tier', economyFor('dear-model', priced).tier, 'HEAVY');
+  eq('live prices are quoted', economyFor('cheap-model', priced).inputPerMTok, 0.1);
+}
+
+// ------------------------------------------------------- empty completions
+
+section('empty completion handling');
+{
+  const original = globalThis.fetch;
+  try {
+    // A stream carrying neither prose nor a tool call is an empty completion, and
+    // has to read as one: that is what earns a second attempt with a real budget.
+    globalThis.fetch = async () =>
+      sseResponse([
+        'event: message_start\ndata: {"type":"message_start","message":{}}\n\n',
+        'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n'
+      ]);
+    let kind = '';
+    try {
+      await streamChat(baseConfig, [{ role: 'user', text: 'hi' }], [], { onText: () => undefined, onToolStart: () => undefined }, new AbortController().signal);
+    } catch (err) {
+      kind = (err as { kind?: string }).kind ?? '';
+    }
+    eq('blank stream is a parse error', kind, 'PARSE');
+
+    // A turn that is only a tool call is a real answer, not a blank one.
+    globalThis.fetch = async () =>
+      sseResponse([
+        'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"list_dir"}}\n\n',
+        'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}\n\n'
+      ]);
+    const toolOnly = await streamChat(
+      baseConfig,
+      [{ role: 'user', text: 'hi' }],
+      [{ name: 'list_dir', description: '', input_schema: { type: 'object', properties: {} } }],
+      { onText: () => undefined, onToolStart: () => undefined },
+      new AbortController().signal
+    );
+    eq('a tool-only turn is not blank', toolOnly.text, '');
+    eq('a tool-only turn keeps its call', toolOnly.toolCalls[0]?.name, 'list_dir');
   } finally {
     globalThis.fetch = original;
   }

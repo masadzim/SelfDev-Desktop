@@ -262,6 +262,8 @@ async function runSmokeTest(get: () => BrowserWindow | null): Promise<void> {
         out.sessionRows = $('sdSessionList').querySelectorAll('.sd-session').length;
         out.toolChips = $('sdToolsBar').querySelectorAll('[data-tool]').length;
         out.iconsRendered = document.querySelectorAll('svg use').length;
+        out.marks = [...document.querySelectorAll('.sd-mark svg')].map((s) => Math.round(s.getBoundingClientRect().width)).filter((w) => w > 0).length;
+        out.markGradients = document.querySelectorAll('[id^="sdLogoGradient"]').length;
         out.themeBtn = !!$('sdThemeBtn').querySelector('use');
         out.hintHtml = $('sdWsHint').textContent;
         // toggle theme + mode round trip
@@ -294,6 +296,10 @@ async function runSmokeTest(get: () => BrowserWindow | null): Promise<void> {
     if ((p.sessionRows as number) < 1) fail('no session rows rendered');
     if ((p.toolChips as number) !== (p.toolCount as number)) fail('tool chips mismatch');
     if ((p.iconsRendered as number) < 10) fail('icon sprite did not resolve');
+    // The app mark carries a gradient, which only paints when it is a self-contained
+    // visible <svg> — a broken one collapses to an invisible dot.
+    if ((p.marks as number) < 2) fail(`app mark did not render (${p.marks})`);
+    if ((p.markGradients as number) < 2) fail(`app mark gradient missing (${p.markGradients})`);
     if (!p.themeBtn) fail('theme button empty');
     if (state?.config?.model === undefined) fail('config.model missing');
     const geom = p.geom as Record<string, { w: number; h: number } | null>;
@@ -318,17 +324,37 @@ async function runSmokeTest(get: () => BrowserWindow | null): Promise<void> {
     problems.push(`probe failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  if (process.env.SELFDEV_SMOKE_E2E === '1') {
-    const e2e = await runSmokeAgent(get);
-    checks.e2e = e2e.checks;
-    problems.push(...e2e.problems);
-  }
-
+  // The console is captured before the e2e run, which leaves the settings dialog
+  // open on purpose.
   try {
     const img = await win.webContents.capturePage();
     await fsPromises.writeFile(process.env.SELFDEV_SHOT ?? '/tmp/opencode/selfdev-smoke.png', img.toPNG());
   } catch (err) {
     problems.push(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (process.env.SELFDEV_SMOKE_E2E === '1') {
+    const mockBase = process.env.SELFDEV_MOCK_BASE ?? process.env.SELFDEV_MOCK_URL ?? '';
+    const e2e = await runSmokeAgent(get);
+    checks.e2e = e2e.checks;
+    problems.push(...e2e.problems);
+
+    const settings = await runSmokeSettings(get() as BrowserWindow, mockBase);
+    checks.settings = settings.checks;
+    problems.push(...settings.problems);
+
+    // Best-effort: whether the freshly opened overlay lands in the grabbed frame
+    // is up to the compositor, so the assertions above, not this image, are the
+    // regression guard for the dialog.
+    try {
+      const shot = await (get() as BrowserWindow).webContents.capturePage();
+      await fsPromises.writeFile(
+        process.env.SELFDEV_SHOT_SETTINGS ?? '/tmp/opencode/selfdev-settings.png',
+        shot.toPNG()
+      );
+    } catch {
+      /* the main screenshot is the one that matters */
+    }
   }
 
   console.log(`SMOKE_RESULT ${JSON.stringify({ checks, problems })}`);
@@ -359,7 +385,8 @@ async function runSmokeAgent(get: () => BrowserWindow | null): Promise<{
       const off = window.selfdev.onRunEvent((e) => events.push(e));
       await window.selfdev.saveConfig({
         provider: ${JSON.stringify(process.env.SELFDEV_MOCK_PROVIDER ?? 'custom')},
-        baseUrl: ${JSON.stringify(process.env.SELFDEV_MOCK_BASE ?? baseUrl)},
+        customBaseUrl: ${JSON.stringify(process.env.SELFDEV_MOCK_BASE ?? baseUrl)},
+        customWireApi: ${JSON.stringify(process.env.SELFDEV_MOCK_WIRE_API ?? 'OPENAI_CHAT')},
         apiKey: 'smoke-key',
         model: 'mock-model',
         temperature: 0
@@ -432,6 +459,131 @@ async function runSmokeAgent(get: () => BrowserWindow | null): Promise<{
   }
 
   return { checks, problems };
+}
+
+/**
+ * Settings dialog regression check.
+ *
+ * The dialog is persistent on purpose: losing a half-typed API key because the
+ * pointer slipped outside the card, or because Escape landed mid-request, is the
+ * bug this guards against.
+ */
+async function runSmokeSettings(
+  win: BrowserWindow,
+  mockBase: string
+): Promise<{ checks: Record<string, unknown>; problems: string[] }> {
+  const problems: string[] = [];
+  const checks: Record<string, unknown> = {};
+  if (!mockBase) return { checks, problems: ['settings: no mock base url'] };
+
+  const script = `
+    (async () => {
+      const $ = (id) => document.getElementById(id);
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const key = (type) => document.dispatchEvent(new KeyboardEvent('keydown', { key: type, bubbles: true }));
+      const out = {};
+
+      $('sdSettingsBtn').click();
+      await wait(250);
+      const modal = $('sdSettings');
+      out.opened = modal.classList.contains('open');
+      out.providerRows = modal.querySelectorAll('#sdProviderList [data-provider]').length;
+      out.scrollTop = modal.querySelector('.sd-settings-scroll').scrollTop;
+      const card = modal.querySelector('.sd-settings-card');
+      out.cardOverflows = card.scrollHeight > card.clientHeight + 1;
+      out.sections = modal.querySelectorAll('.sd-sec').length;
+      out.customHidden = $('sdCustomWrap').hidden;
+      out.keyBadge = ($('sdKeyBadge').textContent || '').trim();
+
+      // A backdrop click must not dismiss, and must not eat what was typed.
+      const keyField = $('sdApiKey');
+      keyField.value = 'sk-ant-half-typed-key';
+      keyField.dispatchEvent(new Event('input', { bubbles: true }));
+      const backdrop = modal.getBoundingClientRect();
+      const outside = document.elementFromPoint(backdrop.left + 4, backdrop.top + 4);
+      outside.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      outside.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await wait(120);
+      out.staysOpenOnBackdropClick = modal.classList.contains('open');
+      out.keepsTypedKey = keyField.value === 'sk-ant-half-typed-key';
+      out.detectedProvider = modal.querySelector('#sdProviderList .sd-radio.on')?.dataset.provider ?? null;
+
+      // Escape closes when idle.
+      key('Escape');
+      await wait(80);
+      out.escapeClosesWhenIdle = !modal.classList.contains('open');
+
+      // Escape must NOT close while a request is in flight.
+      $('sdSettingsBtn').click();
+      await wait(200);
+      const custom = modal.querySelector('#sdProviderList [data-provider="custom"]');
+      custom.click();
+      await wait(80);
+      $('sdCustomBaseUrl').value = ${JSON.stringify(mockBase)} + '/slow';
+      ${JSON.stringify(process.env.SELFDEV_MOCK_WIRE_API ?? 'OPENAI_CHAT')} === 'ANTHROPIC_MESSAGES'
+        ? document.querySelector('[data-wire="ANTHROPIC_MESSAGES"]').click()
+        : document.querySelector('[data-wire="OPENAI_CHAT"]').click();
+      $('sdCustomBaseUrl').dispatchEvent(new Event('input', { bubbles: true }));
+      $('sdApiKey').value = 'smoke-key';
+      $('sdApiKey').dispatchEvent(new Event('input', { bubbles: true }));
+      $('sdTest').click();
+      await wait(400);
+      out.busyDuringTest = modal.classList.contains('busy');
+      key('Escape');
+      $('sdSettingsClose').click();
+      await wait(300);
+      out.staysOpenWhileBusy = modal.classList.contains('open');
+
+      // ...and closes normally once it is done.
+      for (let i = 0; i < 40 && modal.classList.contains('busy'); i++) await wait(200);
+      out.busyAfterTest = modal.classList.contains('busy');
+      out.testTranscript = ($('sdTestResult').textContent || '').trim();
+      key('Escape');
+      await wait(80);
+      out.escapeClosesAfterTest = !modal.classList.contains('open');
+
+      // Left open on the custom-provider block for the screenshot.
+      $('sdSettingsBtn').click();
+      await wait(200);
+      modal.querySelector('#sdProviderList [data-provider="custom"]')?.click();
+      await wait(150);
+      out.leftOpen = modal.classList.contains('open');
+      out.customBlockVisible = !$('sdCustomWrap').hidden;
+      out.wirePills = $('sdWirePills').querySelectorAll('[data-wire]').length;
+      return out;
+    })()
+  `;
+
+  let result: Record<string, unknown>;
+  try {
+    result = (await win.webContents.executeJavaScript(script, true)) as Record<string, unknown>;
+  } catch (err) {
+    return { checks, problems: [`settings: renderer threw ${err instanceof Error ? err.message : String(err)}`] };
+  }
+
+  const expect = (cond: unknown, message: string): void => {
+    if (!cond) problems.push(message);
+  };
+  expect(result.opened === true, 'settings: dialog did not open');
+  expect(result.providerRows === 17, `settings: expected 17 provider rows, got ${result.providerRows}`);
+  expect(Number(result.sections) >= 5, `settings: sections missing (${result.sections})`);
+  expect(result.scrollTop === 0, `settings: dialog reopened scrolled (${result.scrollTop})`);
+  expect(result.cardOverflows === false, 'settings: dialog card scrolls behind its own scroller');
+  expect(result.staysOpenOnBackdropClick === true, 'settings: backdrop click closed the dialog');
+  expect(result.keepsTypedKey === true, 'settings: backdrop click lost the typed key');
+  expect(result.detectedProvider === 'anthropic', `settings: key prefix not detected (${result.detectedProvider})`);
+  expect(result.escapeClosesWhenIdle === true, 'settings: Escape did not close an idle dialog');
+  expect(result.busyDuringTest === true, 'settings: dialog never reported busy during a test');
+  expect(result.staysOpenWhileBusy === true, 'settings: dialog closed while a request was in flight');
+  expect(result.busyAfterTest === false, 'settings: dialog stuck in busy state');
+  expect(
+    String(result.testTranscript ?? '').includes('berhasil'),
+    `settings: connection test did not report success (${result.testTranscript})`
+  );
+  expect(result.escapeClosesAfterTest === true, 'settings: Escape did not close after a finished test');
+  expect(Number(result.wirePills) === 3, `settings: expected 3 wire formats, got ${result.wirePills}`);
+
+  return { checks: result, problems };
 }
 
 app.on('window-all-closed', () => {

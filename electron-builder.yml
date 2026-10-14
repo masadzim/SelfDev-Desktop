@@ -37,7 +37,9 @@ linux:
   synopsis: SelfDev · AI Developer Console
   description: >-
     Asisten coding opencode-style dengan tools lokal (baca/tulis/edit/grep/glob/run)
-    dan BYOK (Anthropic, OpenAI, OpenRouter, Groq, custom).
+    dan BYOK untuk 17 provider: OpenAI, Anthropic, Gemini, Groq, DeepSeek,
+    OpenRouter, Together, Fireworks, xAI, Mistral, Cerebras, NVIDIA NIM,
+    SambaNova, Hyperbolic, Novita, Ollama lokal, dan gateway OpenAI-compatible.
   icon: assets/icon.png
   target:
     - target: AppImage

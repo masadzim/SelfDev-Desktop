@@ -39,10 +39,31 @@ const server = createServer((req, res) => {
     }
 
     console.log(`[mock] ${req.method} ${req.url} keys=${Object.keys(parsed).join(',')} auth=${Boolean(req.headers['x-api-key'] || req.headers.authorization)}`);
+    // A slow answer, so the smoke test can assert the settings dialog stays put
+    // while a request is still in flight.
+    if (req.url?.includes('/slow') && req.url?.includes('/chat/completions')) return slowStream(res);
+    if (req.url?.includes('/slow') && req.url?.includes('/messages')) return slowStream(res, true);
     if (req.url?.includes('/messages')) return anthropicStream(res, parsed);
     return openAiStream(res, parsed);
   });
 });
+
+function slowStream(res, anthropic = false) {
+  setTimeout(() => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    if (anthropic) {
+      anth(res, 'message_start', { message: { id: 'msg_slow', type: 'message', role: 'assistant', content: [] } });
+      anth(res, 'content_block_delta', { index: 0, delta: { type: 'text_delta', text: 'ok' } });
+      anth(res, 'message_delta', { delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } });
+      anth(res, 'message_stop', {});
+    } else {
+      sse(res, { choices: [{ delta: { content: 'ok' } }] });
+      sse(res, { choices: [{ delta: {}, finish_reason: 'stop' }] });
+      res.write('data: [DONE]\n\n');
+    }
+    res.end();
+  }, 2500);
+}
 
 /** True once the model has been shown a tool_result (Anthropic shape). */
 function sawToolResult(messages = []) {

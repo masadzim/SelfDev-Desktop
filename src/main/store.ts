@@ -3,10 +3,20 @@ import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-import { defaultConfig, deriveSessionTitle, normalizeConfig, PROVIDERS } from '../shared/providers';
-import type { AppConfig, ChatMessage, PersistedState, ProviderId, Session, WorkspaceMode } from '../shared/types';
+import {
+  defaultConfig,
+  deriveSessionTitle,
+  isKnownProvider,
+  normalizeBaseUrl,
+  normalizeConfig,
+  presetFor,
+  resolve,
+  WIRE_APIS
+} from '../shared/providers';
+import type { AppConfig, PersistedState, ProviderId, Session, WireApi, WorkspaceMode } from '../shared/types';
+import { open as unseal, seal } from './keyVault';
 
-const STATE_VERSION = 1;
+const STATE_VERSION = 2;
 const MAX_SESSIONS = 200;
 
 function defaultState(): PersistedState {
@@ -26,9 +36,43 @@ function newId(prefix: string): string {
 }
 
 /**
+ * v1 stored a per-provider `baseUrl` the user could edit. v2 keeps the base URL
+ * with the provider it belongs to: an endpoint that differs from the preset's is
+ * the user's own gateway, so it becomes a custom provider rather than being
+ * silently overwritten on the next save.
+ */
+function migrateConfig(raw: Record<string, unknown>): Partial<AppConfig> {
+  const legacy = {
+    ...(raw as Partial<AppConfig>),
+    provider: raw.provider as ProviderId,
+    customBaseUrl: typeof raw.customBaseUrl === 'string' ? raw.customBaseUrl : '',
+    customWireApi: WIRE_APIS.includes(raw.customWireApi as WireApi)
+      ? (raw.customWireApi as WireApi)
+      : ('OPENAI_CHAT' as WireApi)
+  };
+  const legacyBaseUrl = typeof raw.baseUrl === 'string' ? normalizeBaseUrl(raw.baseUrl) : '';
+
+  if (!isKnownProvider(legacy.provider)) {
+    // An id from a build that knew a provider we no longer ship: keep the
+    // endpoint rather than stranding it on the default provider.
+    return legacyBaseUrl ? { ...legacy, provider: 'custom', customBaseUrl: legacyBaseUrl } : legacy;
+  }
+  if (legacy.provider === 'custom') {
+    return { ...legacy, customBaseUrl: legacy.customBaseUrl || legacyBaseUrl };
+  }
+  if (legacyBaseUrl && legacyBaseUrl !== presetFor(legacy.provider).baseUrl) {
+    return { ...legacy, provider: 'custom', customBaseUrl: legacyBaseUrl };
+  }
+  return { ...legacy, customBaseUrl: '' };
+}
+
+/**
  * JSON-file backed application state (settings, sessions, workspace root).
  * Writes are debounced and atomic (tmp file + rename) so a crash mid-write
  * can never leave a truncated state file behind.
+ *
+ * The API key is the one secret in here, so it is written sealed and only ever
+ * read back through `keyVault`.
  */
 export class Store {
   private state: PersistedState = defaultState();
@@ -40,7 +84,7 @@ export class Store {
     this.file = join(app.getPath('userData'), 'state.json');
     try {
       const raw = await fs.readFile(this.file, 'utf8');
-      const parsed = JSON.parse(raw) as Partial<PersistedState>;
+      const parsed = JSON.parse(raw) as Partial<PersistedState> & { config?: Record<string, unknown> };
       this.state = this.sanitize(parsed);
     } catch {
       this.state = defaultState();
@@ -49,15 +93,15 @@ export class Store {
     this.ensureActiveSession();
   }
 
-  private sanitize(raw: Partial<PersistedState>): PersistedState {
+  private sanitize(raw: Partial<PersistedState> & { config?: Record<string, unknown> }): PersistedState {
     const base = defaultState();
-    const cfg = normalizeConfig({ ...base.config, ...(raw.config ?? {}) } as Partial<AppConfig>);
-    // Provider must exist, otherwise fall back to defaults entirely.
-    if (!PROVIDERS[cfg.provider as ProviderId]) cfg.provider = base.config.provider;
+    const migrated = migrateConfig((raw.config ?? {}) as Record<string, unknown>);
+    const cfg = normalizeConfig({ ...base.config, ...migrated });
     const sessions = Array.isArray(raw.sessions) ? raw.sessions.filter((s) => this.isSession(s)) : [];
     return {
       version: STATE_VERSION,
-      config: cfg,
+      // Sealed at rest; `getConfig`/`getState` unseal for the caller.
+      config: { ...cfg, apiKey: seal(cfg.apiKey) },
       sessions: sessions.map((s) => this.normalizeSession(s)).slice(0, MAX_SESSIONS),
       activeSessionId: typeof raw.activeSessionId === 'string' ? raw.activeSessionId : null,
       workspaceRoot: typeof raw.workspaceRoot === 'string' ? raw.workspaceRoot : null,
@@ -71,7 +115,7 @@ export class Store {
   }
 
   private normalizeSession(s: Session): Session {
-    const messages: ChatMessage[] = (Array.isArray(s.messages) ? s.messages : [])
+    const messages = (Array.isArray(s.messages) ? s.messages : [])
       .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
       .map((m) => ({
         role: m.role,
@@ -123,18 +167,30 @@ export class Store {
 
   // ---------- accessors ----------
 
+  /** Whole state for the renderer, with the API key unsealed for the form. */
   getState(): PersistedState {
-    return JSON.parse(JSON.stringify(this.state)) as PersistedState;
+    const copy = JSON.parse(JSON.stringify(this.state)) as PersistedState;
+    copy.config.apiKey = unseal(this.state.config.apiKey);
+    return copy;
   }
 
+  /** Runtime config for the agent, with the API key in plaintext in memory. */
   getConfig(): AppConfig {
-    return this.state.config;
+    return { ...this.state.config, apiKey: unseal(this.state.config.apiKey) };
   }
 
   updateConfig(patch: Partial<AppConfig>): AppConfig {
-    this.state.config = normalizeConfig({ ...this.state.config, ...patch });
+    const next = normalizeConfig({ ...this.getConfig(), ...patch });
+    this.state.config = { ...next, apiKey: seal(next.apiKey) };
     this.scheduleWrite();
-    return this.state.config;
+    return this.getConfig();
+  }
+
+  /** True when the saved provider + model can actually be called. */
+  isConfigured(): boolean {
+    const cfg = this.getConfig();
+    const endpoint = resolve(cfg.provider, cfg.customBaseUrl, cfg.model, true, cfg.customWireApi);
+    return Boolean(endpoint) && (!endpoint?.requiresApiKey || cfg.apiKey !== '');
   }
 
   getTheme(): 'light' | 'dark' {
@@ -200,8 +256,7 @@ export class Store {
       ? this.state.sessions.find((s) => s.id === this.state.activeSessionId)
       : undefined;
     if (found) return found;
-    const created = this.createSession(true);
-    return created;
+    return this.createSession(true);
   }
 
   getActiveSession(): Session {
@@ -251,7 +306,6 @@ export class Store {
       const derived = deriveSessionTitle(stored.messages);
       if (derived) stored.title = derived;
     }
-    // keep list sorted by recency without reordering the array mid-iteration
     this.scheduleWrite();
   }
 

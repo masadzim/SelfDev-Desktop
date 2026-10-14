@@ -18,8 +18,11 @@ const port = Number(process.env.SELFDEV_MOCK_PORT ?? 8765);
 const format = process.env.SELFDEV_MOCK_FORMAT ?? 'openai';
 const mockBase = `http://127.0.0.1:${port}`;
 // What the app must be configured with so requests land on the mock handler.
-const appBase = format === 'anthropic' ? mockBase : `${mockBase}/v1`;
-const appProvider = format === 'anthropic' ? 'anthropic' : 'custom';
+// A provider preset owns its base URL, so pointing the Anthropic *wire format*
+// at a local mock means a custom gateway speaking that format.
+const appBase = `${mockBase}/v1`;
+const appProvider = 'custom';
+const appWireApi = format === 'anthropic' ? 'ANTHROPIC_MESSAGES' : 'OPENAI_CHAT';
 
 const ud = mkdtempSync(join(tmpdir(), 'selfdev-smoke-ud-'));
 const ws = mkdtempSync(join(tmpdir(), 'selfdev-smoke-ws-'));
@@ -31,8 +34,9 @@ writeFileSync(
   JSON.stringify({
     version: 1,
     config: {
-      provider: format === 'anthropic' ? 'anthropic' : 'custom',
+      provider: appProvider,
       baseUrl: appBase,
+      customWireApi: appWireApi,
       apiKey: 'smoke-key',
       model: 'mock-model',
       temperature: 0,
@@ -43,7 +47,7 @@ writeFileSync(
     sessions: [],
     activeSessionId: null,
     workspaceRoot: ws,
-    theme: 'dark',
+    theme: process.env.SELFDEV_SMOKE_THEME === 'light' ? 'light' : 'dark',
     createdAt: Date.now()
   })
 );
@@ -69,6 +73,7 @@ if (withAgent) {
   env.SELFDEV_MOCK_URL = appBase;
   env.SELFDEV_MOCK_BASE = appBase;
   env.SELFDEV_MOCK_PROVIDER = appProvider;
+  env.SELFDEV_MOCK_WIRE_API = appWireApi;
   env.SELFDEV_MOCK_LOG = log;
   mock = spawn(process.execPath, ['tests/mock-provider.mjs'], {
     cwd: root,

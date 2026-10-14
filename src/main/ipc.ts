@@ -3,11 +3,12 @@ import { promises as fs } from 'node:fs';
 
 import { Store } from './store';
 import { runAgent, MISSING_KEY_MESSAGE } from './agent';
-import { testConnection } from './llm/chat';
+import { LlmError, listModelCatalog, testConnection as probeConnection } from './llm/chat';
 import { toolMetas, walkWorkspaceFiles } from './tools';
-import { PROVIDERS, normalizeConfig } from '../shared/providers';
-import type { AppConfig, ProviderId, RunEvent, WorkspaceMode } from '../shared/types';
+import { PRESETS, labelFor, presetFor, repairModelFor } from '../shared/providers';
+import type { AppConfig, ModelEntry, ProviderId, RunEvent, WireApi, WorkspaceMode } from '../shared/types';
 import { windowBg } from '../shared/theme';
+import { vaultMode } from './keyVault';
 import { getUpdaterApi, type UpdateState } from './updater';
 
 const unsupportedState = (): UpdateState => ({
@@ -49,7 +50,8 @@ export function registerIpc({ store, getWindow }: IpcDeps): () => void {
   // ------------------------------------------------------------- state
   handle('getState', () => ({
     ...store.getState(),
-    tools: toolMetas()
+    tools: toolMetas(),
+    keyProtection: vaultMode()
   }));
 
   // ------------------------------------------------------------ config
@@ -59,21 +61,73 @@ export function registerIpc({ store, getWindow }: IpcDeps): () => void {
     session.model = cfg.model;
     store.touch(session);
     store.sortSessions();
-    return store.getState();
+    return { ...store.getState(), tools: toolMetas(), keyProtection: vaultMode() };
   });
 
-  handle('testConnection', async (params: { provider: ProviderId; baseUrl: string; apiKey: string; model: string }) => {
-    const cfg = normalizeConfig({
-      ...store.getConfig(),
-      provider: params.provider,
-      baseUrl: params.baseUrl,
-      apiKey: params.apiKey,
-      model: params.model
-    });
-    return testConnection({ mode: cfg.mode, baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, model: cfg.model });
-  });
+  handle('getProviders', () => PRESETS);
 
-  handle('getProviders', () => PROVIDERS);
+  /**
+   * Proves a key works, using the values currently in the form rather than the
+   * saved ones, so a half-typed setup can be tested before it is committed.
+   */
+  handle(
+    'testConnection',
+    async (params: {
+      provider: ProviderId;
+      customBaseUrl: string;
+      customWireApi?: WireApi;
+      apiKey: string;
+      model: string;
+    }) => {
+      const saved = store.getConfig();
+      return probeConnection(
+        params.provider,
+        params.customBaseUrl ?? '',
+        params.apiKey || saved.apiKey,
+        params.model || saved.model,
+        new AbortController().signal,
+        params.customWireApi ?? saved.customWireApi
+      );
+    }
+  );
+
+  /** `/models` discovery, so pricing is read from the provider and never baked in. */
+  handle(
+    'fetchModels',
+    async (params: {
+      provider: ProviderId;
+      customBaseUrl: string;
+      customWireApi?: WireApi;
+      apiKey: string;
+    }): Promise<{
+      ok: boolean;
+      message: string;
+      kind: string | null;
+      billingUrl: string | null;
+      models: ModelEntry[];
+    }> => {
+      const saved = store.getConfig();
+      try {
+        const models = await listModelCatalog(
+          params.provider,
+          params.customBaseUrl ?? '',
+          params.apiKey || saved.apiKey,
+          new AbortController().signal,
+          params.customWireApi ?? saved.customWireApi
+        );
+        return { ok: true, message: `${models.length} model ditemukan`, kind: null, billingUrl: null, models };
+      } catch (err) {
+        const kind = err instanceof LlmError ? err.kind : 'UNKNOWN';
+        return {
+          ok: false,
+          message: err instanceof Error ? err.message : String(err),
+          kind,
+          billingUrl: kind === 'BILLING' ? (presetFor(params.provider).billingUrl ?? null) : null,
+          models: []
+        };
+      }
+    }
+  );
 
   handle('setMode', (mode: WorkspaceMode) => store.setMode(mode === 'plan' ? 'plan' : 'dev'));
   handle('setTheme', (theme: 'light' | 'dark') => {
@@ -117,9 +171,12 @@ export function registerIpc({ store, getWindow }: IpcDeps): () => void {
     if (controller.running) return;
 
     const cfg = store.getConfig();
-    if (!cfg.apiKey) {
+    if (!store.isConfigured()) {
+      const preset = cfg.provider ?? 'groq';
+      const better = repairModelFor(preset);
+      const hint = better ? `\n\nCoba model: \`${better}\` (provider: ${labelFor(preset)}).` : '';
       emit({ type: 'started' });
-      emit({ type: 'text', text: MISSING_KEY_MESSAGE });
+      emit({ type: 'text', text: MISSING_KEY_MESSAGE + hint });
       emit({ type: 'finished', status: 'error' });
       return;
     }
@@ -165,7 +222,7 @@ export function registerIpc({ store, getWindow }: IpcDeps): () => void {
     await store.flush();
   });
 
-  // ---------------------------------------------------------- auto-update
+  // -------------------------------------------------------- auto-update
   handle('update:getState', () => getUpdaterApi()?.getState() ?? unsupportedState());
   handle('update:check', () => getUpdaterApi()?.check() ?? unsupportedState());
   handle('update:download', () => getUpdaterApi()?.download() ?? unsupportedState());

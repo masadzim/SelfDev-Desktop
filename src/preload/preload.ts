@@ -14,6 +14,7 @@ const api = {
   getState: () => invoke('getState'),
   saveConfig: (patch: unknown) => invoke('saveConfig', patch),
   testConnection: (params: unknown) => invoke('testConnection', params),
+  fetchModels: (params: unknown) => invoke('fetchModels', params),
   getProviders: () => invoke('getProviders'),
 
   setMode: (mode: string) => invoke('setMode', mode),

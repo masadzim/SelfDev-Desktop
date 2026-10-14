@@ -1,26 +1,127 @@
 /** Shared contract between main process, preload and renderer. */
 
-export type ProviderId = 'anthropic' | 'openai' | 'openrouter' | 'groq' | 'custom';
-export type ApiMode = 'anthropic' | 'openai';
+/**
+ * Wire format spoken by a provider. Mirrors the Android client's `WireApi`
+ * exactly, because the three formats disagree about far more than field names:
+ * the auth header, the streaming verb, the tool-call shape and the usage
+ * reporting all differ per format.
+ */
+export type WireApi = 'OPENAI_CHAT' | 'ANTHROPIC_MESSAGES' | 'GEMINI_CONTENT';
+
+export type ProviderId =
+  | 'openai'
+  | 'anthropic'
+  | 'gemini'
+  | 'groq'
+  | 'deepseek'
+  | 'openrouter'
+  | 'together'
+  | 'fireworks'
+  | 'xai'
+  | 'mistral'
+  | 'cerebras'
+  | 'nvidia'
+  | 'sambanova'
+  | 'hyperbolic'
+  | 'novita'
+  | 'ollama'
+  | 'custom';
+
 export type WorkspaceMode = 'dev' | 'plan';
 
-export interface ProviderInfo {
+/** One catalogue entry. `custom` carries a user-typed base URL instead. */
+export interface ProviderPreset {
   id: ProviderId;
-  name: string;
+  label: string;
   baseUrl: string;
-  mode: ApiMode;
-  models: string[];
+  wireApi: WireApi;
+  suggestedModels: string[];
+  envVar: string;
+  /** Local gateways need no key, so the security section hides the field. */
+  isLocal: boolean;
+  /** Where the user tops up or checks credits; opened from a billing notice. */
+  billingUrl: string | null;
+  /**
+   * A small, fast, non-reasoning model used only to prove a key works.
+   *
+   * The connection test must not run on whatever model the user happens to have
+   * selected: a reasoning model can spend the whole budget thinking and answer
+   * nothing, and an expensive one charges the user for a test. Null means "no
+   * model here is known well enough to guess", and the test falls back to the
+   * active model rather than failing.
+   */
+  testModel: string | null;
 }
+
+/** A provider + model pair reduced to everything the transport needs. */
+export interface ResolvedEndpoint {
+  providerId: ProviderId;
+  providerLabel: string;
+  wireApi: WireApi;
+  baseUrl: string;
+  modelId: string;
+  requiresApiKey: boolean;
+  /** False when the provider cannot read images, so attachments are refused up front. */
+  supportsImages: boolean;
+}
+
+/** One row of a provider `/models` payload, with whatever price it volunteered. */
+export interface ModelEntry {
+  id: string;
+  inputPerMTok: number | null;
+  outputPerMTok: number | null;
+  contextLength: number | null;
+}
+
+/**
+ * Why a request failed. Providers disagree about what a status code means, so
+ * the body is read too; the kind is what the UI turns into a next step.
+ */
+export type ApiErrorKind =
+  | 'BILLING'
+  | 'RATE_LIMIT'
+  | 'AUTH'
+  | 'MODEL'
+  | 'NETWORK'
+  | 'SERVER'
+  | 'PARSE'
+  | 'UNKNOWN'
+  | 'TIMEOUT'
+  | 'TLS';
 
 export interface AppConfig {
   provider: ProviderId;
-  baseUrl: string;
+  /** Base URL of the custom gateway. Every other provider uses its preset's. */
+  customBaseUrl: string;
+  /**
+   * Wire format of the custom gateway. Defaults to `OPENAI_CHAT`, which is what
+   * every preset provider except Anthropic and Gemini speaks, and what the
+   * Android client assumes. A self-hosted Anthropic-compatible gateway needs the
+   * other two.
+   */
+  customWireApi: WireApi;
   apiKey: string;
   model: string;
   temperature: number;
   maxTokens: number;
   system: string;
-  mode: ApiMode;
+}
+
+export interface LlmUsage {
+  promptTokens: number;
+  completionTokens: number;
+  /** False when the provider reported no usage block at all. */
+  isKnown: boolean;
+}
+
+/** Result of a settings connection test, rich enough to suggest a next step. */
+export interface ConnectionReport {
+  ok: boolean;
+  message: string;
+  kind: ApiErrorKind | null;
+  billingUrl: string | null;
+  /** A model the account can actually reach, when the active one is refused. */
+  suggestedModel: string | null;
 }
 
 export interface ToolCallRecord {
@@ -103,12 +204,18 @@ export interface ToolResult {
 export interface SelfDevBridge {
   getState(): Promise<PersistedState>;
   saveConfig(patch: Partial<AppConfig>): Promise<PersistedState>;
+  getProviders(): Promise<ProviderPreset[]>;
   testConnection(cfg: {
     provider: ProviderId;
-    baseUrl: string;
+    customBaseUrl: string;
     apiKey: string;
     model: string;
-  }): Promise<{ ok: boolean; message: string }>;
+  }): Promise<ConnectionReport>;
+  fetchModels(cfg: {
+    provider: ProviderId;
+    customBaseUrl: string;
+    apiKey: string;
+  }): Promise<{ ok: boolean; message: string; models: ModelEntry[] }>;
   setMode(mode: WorkspaceMode): Promise<WorkspaceMode>;
   setTheme(theme: 'light' | 'dark'): Promise<'light' | 'dark'>;
 
