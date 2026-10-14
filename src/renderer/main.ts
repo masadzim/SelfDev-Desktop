@@ -14,7 +14,8 @@ import {
   supportsDiscovery
 } from '../shared/providers';
 import type { Attachment } from '../shared/attachments';
-import { DOCS } from '../shared/docs';
+import { docsFor } from '../shared/docs';
+import { LANGUAGES, translate, type Language } from '../shared/i18n';
 import { IMAGE_SIZES, findImageModel, imageModels, imageProviderIds } from '../shared/imagegen';
 import { MAX_INLINE_BYTES, humanBytes, messageFor } from '../shared/attachments';
 import { suggestedFilename } from '../shared/backupFormat';
@@ -256,7 +257,7 @@ function grab(): void {
     'sdModelSub', 'sdFetchModels', 'sdModelCount', 'sdModel', 'sdModelAdd', 'sdModelListBox', 'sdModelNote',
     'sdSystem', 'sdMaxTokens', 'sdTemp',
     'sdThemeSub', 'sdThemeLight', 'sdThemeDark', 'sdModeDev', 'sdModePlan',
-    'sdKeyProtection'
+    'sdKeyProtection', 'sdLangPills', 'sdLangLabel'
   ];
   for (const id of ids) {
     const node = document.getElementById(id);
@@ -265,6 +266,80 @@ function grab(): void {
 }
 
 /* --------------------------------------------------------------- helpers - */
+
+/**
+ * Interface string for the active language.
+ *
+ * Indonesian is the fallback for a key the English table does not have, and the
+ * key itself is the last resort, so a gap in the table reads as text rather than
+ * as `section.model`.
+ */
+function t(key: string, vars?: Record<string, string | number>): string {
+  return translate(ui.language, key, vars);
+}
+
+/**
+ * Applies the language to the static markup.
+ *
+ * Only `[data-i18n-*]` elements are touched; anything the renderer owns is
+ * re-rendered by its own pass, so the two cannot overwrite each other.
+ */
+function applyLanguage(): void {
+  document.documentElement.lang = ui.language;
+  document.querySelectorAll<HTMLElement>('[data-i18n-text]').forEach((node) => {
+    node.textContent = t(node.dataset.i18nText as string);
+  });
+  for (const attr of ['title', 'placeholder', 'aria-label'] as const) {
+    document.querySelectorAll<HTMLElement>(`[data-i18n-${attr}]`).forEach((node) => {
+      const key = node.dataset[`i18n${attr[0].toUpperCase()}${attr.slice(1)}`];
+      if (key) node.setAttribute(attr, t(key));
+    });
+  }
+  // A handful of strings carry markup (the composer hint bolds the key names),
+  // so they are rendered rather than assigned as text.
+  document.querySelectorAll<HTMLElement>('[data-i18n-html]').forEach((node) => {
+    const key = node.dataset.i18nHtml as string;
+    if (key === 'composer.hint') {
+      node.innerHTML = t(key, {
+        send: `<b>${escapeHtml(t('composer.enter'))}</b>`,
+        newline: `<b>${escapeHtml(t('composer.shiftEnter'))}</b>`,
+        at: `<b>${escapeHtml(t('composer.at'))}</b>`
+      });
+      return;
+    }
+    node.innerHTML = escapeHtml(t(key));
+  });
+  renderLangPills();
+  renderHeader();
+  renderWorkspace();
+  renderToolChips();
+  renderSessions();
+  renderMessages();
+  renderDocs();
+  renderProjects();
+  renderVoice();
+}
+
+function renderLangPills(): void {
+  const box = el.sdLangPills as HTMLElement | undefined;
+  const label = el.sdLangLabel as HTMLElement | undefined;
+  if (!box) return;
+  if (label) label.textContent = ui.language === 'en' ? 'Language' : 'Bahasa';
+  box.innerHTML = LANGUAGES.map(
+    (l) => `<button class="sd-pill${l.id === ui.language ? ' is-on' : ''}" type="button" data-lang="${l.id}" role="radio" aria-checked="${l.id === ui.language}">${escapeHtml(l.label)}</button>`
+  ).join('');
+  box.querySelectorAll<HTMLButtonElement>('[data-lang]').forEach((btn) => {
+    btn.addEventListener('click', () => void setLanguage(btn.dataset.lang as Language));
+  });
+}
+
+async function setLanguage(next: Language): Promise<void> {
+  if (next === ui.language) return;
+  ui.language = await bridge.setLanguage(next);
+  if (settingsOpen()) renderSettingsStatic();
+  else applyLanguage();
+  toast(ui.language === 'en' ? 'Language: English' : 'Bahasa: Indonesia', 'ok');
+}
 
 function icon(name: string, cls = 'ic'): string {
   return `<svg class="${cls}" aria-hidden="true"><use href="#i-${name}" /></svg>`;
@@ -855,12 +930,15 @@ async function generateImage(): Promise<void> {
 function renderDocs(): void {
   const box = el.sdDocsList as HTMLElement | undefined;
   if (!box) return;
-  if (box.dataset.built === '1') return;
-  box.dataset.built = '1';
+  // Which entries are already open is the user's doing, not the language's.
+  const open = new Set(
+    [...box.querySelectorAll<HTMLElement>('.sd-doc.open')].map((d) => d.dataset.doc ?? '')
+  );
 
-  box.innerHTML = DOCS.map(
-    (d, i) => `<article class="sd-doc${i === 0 ? ' open' : ''}">
-      <button class="sd-doc-head" type="button" aria-expanded="${i === 0}">
+  box.innerHTML = docsFor(ui.language)
+    .map(
+      (d, i) => `<article class="sd-doc${(open.size ? open.has(d.id) : i === 0) ? ' open' : ''}" data-doc="${escapeHtml(d.id)}">
+      <button class="sd-doc-head" type="button" aria-expanded="${(open.size ? open.has(d.id) : i === 0)}">
         <span>${escapeHtml(d.title)}</span>
         <span class="sd-sec-chev">${icon('chevron', 'ic ic-sm')}</span>
       </button>
@@ -869,18 +947,19 @@ function renderDocs(): void {
           .map((block) =>
             block.kind === 'p'
               ? `<p>${renderMarkdown(block.text)}</p>`
-              : `<ul>${block.items.map((t) => `<li>${renderMarkdown(t)}</li>`).join('')}</ul>`
+              : `<ul>${block.items.map((item) => `<li>${renderMarkdown(item)}</li>`).join('')}</ul>`
           )
           .join('')}
       </div>
     </article>`
-  ).join('');
+    )
+    .join('');
 
   box.querySelectorAll<HTMLButtonElement>('.sd-doc-head').forEach((head) => {
     head.addEventListener('click', () => {
       const doc = head.closest('.sd-doc');
-      const open = doc?.classList.toggle('open');
-      head.setAttribute('aria-expanded', String(Boolean(open)));
+      const isOpen = doc?.classList.toggle('open');
+      head.setAttribute('aria-expanded', String(Boolean(isOpen)));
     });
   });
 }
@@ -976,6 +1055,35 @@ async function deleteProject(id: string): Promise<void> {
   toast('Proyek dihapus', 'ok');
 }
 
+/* ----------------------------------------------------- settings chrome --- */
+
+/**
+ * The parts of the settings dialog that only depend on the language.
+ *
+ * Rendered here rather than left as markup so switching language does not have
+ * to reopen the dialog or rebuild its input values.
+ */
+function renderSettingsStatic(): void {
+  const lock = el.sdSettingsLockText as HTMLElement | undefined;
+  if (lock) lock.textContent = t('settings.busy');
+
+  const subtitle = (sec: string, key: string): void => {
+    const node = document.querySelector(`[data-sec="${sec}"] .sd-sec-sub`);
+    if (node) node.textContent = t(key);
+  };
+  subtitle('provider', ui.config.provider);
+  subtitle('key', requiresKey() ? currentPreset().label : t('key.localProvider'));
+  subtitle('model', form.model || t('model.none'));
+  subtitle('prompt', t('prompt.label').toLowerCase());
+  subtitle('display', '');
+  subtitle('voice', t('voice.subtitle'));
+  subtitle('backup', t('backup.subtitle'));
+  subtitle('info', t('info.subtitle'));
+  // Applying the language last keeps the section subtitles above from being
+  // overwritten by a pass that only knows about the static markup.
+  applyLanguage();
+}
+
 /* ----------------------------------------------------------- mode picker -- */
 
 function toggleModePicker(force?: boolean): void {
@@ -1066,8 +1174,8 @@ function renderEmpty(): void {
   m.innerHTML = `
     <div class="sd-empty">
       <div class="sd-empty-badge">${logoSvg()}</div>
-      <h3>SelfDev · AI Developer Console</h3>
-      <p>Asisten coding opencode-style. API key disimpan lokal (BYOK), tools berjalan di proses native.</p>
+      <h3>${escapeHtml(t('empty.title'))}</h3>
+      <p>${escapeHtml(t('empty.lead'))}</p>
       <div class="sd-empty-suggest">
         <button type="button" data-prompt="Jelaskan struktur project ini: gunakan list_dir lalu ringkas isinya">🔍 Eksplorasi workspace</button>
         <button type="button" data-prompt="Buat function debounce di JavaScript beserta contoh penggunaannya">⚡ Tulis snippet kode</button>
@@ -1103,8 +1211,8 @@ function toolItem(call: ToolCallRecord, result?: ToolResultRecord): HTMLElement 
       <button class="sd-tool-toggle" type="button" title="Lihat detail">${icon('chevron', 'ic ic-sm')}</button>
     </div>
     <div class="sd-tool-detail">
-      <b>arguments</b><pre>${escapeHtml(JSON.stringify(call.arguments ?? {}, null, 2))}</pre>
-      <b>result</b><pre class="sd-tool-out"></pre>
+      <b>${escapeHtml(t('tool.arguments'))}</b><pre>${escapeHtml(JSON.stringify(call.arguments ?? {}, null, 2))}</pre>
+      <b>${escapeHtml(t('tool.result'))}</b><pre class="sd-tool-out"></pre>
     </div>`;
   item.querySelector('.sd-tool-toggle')?.addEventListener('click', () => item.classList.toggle('open'));
   if (result) {
@@ -1133,12 +1241,12 @@ function paintToolState(item: HTMLElement, kind: 'ok' | 'bad' | 'run'): void {
 function taskCard(text: string): HTMLElement {
   const card = document.createElement('div');
   card.className = 'sd-task';
-  const title = text ? text.replace(/\s+/g, ' ').trim().slice(0, 90) : 'Mengerjakan tugas…';
+  const title = text ? text.replace(/\s+/g, ' ').trim().slice(0, 90) : t('console.thinkingShort');
   card.innerHTML = `
     <div class="sd-task-head">
       <span class="sd-task-avatar">◆</span>
       <span class="sd-task-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
-      <span class="sd-task-state thinking">berpikir…</span>
+      <span class="sd-task-state thinking">${escapeHtml(t('console.thinkingShort'))}</span>
       <button class="sd-task-copy" type="button" title="Salin jawaban">${icon('copy', 'ic ic-sm')}</button>
     </div>
     <div class="sd-tools-list"></div>
@@ -1189,14 +1297,14 @@ function renderMessages(): void {
     }
     const card = taskCard(msg.text ?? '');
     const errored = (msg.tool_results ?? []).some((r) => r.isError);
-    setTaskState(card, 'done', 'selesai');
+    setTaskState(card, 'done', t('console.done'));
     appendTaskText(card, msg.text ?? '');
     const list = card.querySelector('.sd-tools-list');
     for (const call of msg.tool_calls ?? []) {
       const res = (msg.tool_results ?? []).find((r) => r.tool_call_id === call.id);
       list?.appendChild(toolItem(call, res));
     }
-    if (errored) setTaskState(card, 'done', 'selesai (ada tool error)');
+    if (errored) setTaskState(card, 'done', t('console.doneWithToolError'));
     m.appendChild(card);
   }
   scrollToBottom(true);
@@ -1266,6 +1374,7 @@ async function refresh(fromMain = true): Promise<void> {
   renderToolChips();
   renderMessages();
   renderProjects();
+  if (settingsOpen()) renderSettingsStatic();
 }
 
 async function sendMessageText(text: string, carried?: ChatMessage['attachments']): Promise<void> {
@@ -1331,7 +1440,7 @@ async function removeSession(session: Session): Promise<void> {
 }
 
 async function renameSession(session: Session): Promise<void> {
-  const next = window.prompt('Judul sesi', session.title);
+  const next = window.prompt(t('console.rename'), session.title);
   if (next === null) return;
   const title = next.trim();
   if (!title) return;
@@ -1378,7 +1487,7 @@ function handleRunEvent(evt: RunEvent): void {
     case 'started': {
       ui.running = true;
       renderHeader();
-      setStatus('berpikir…', true);
+      setStatus(t('console.thinking'), true);
       break;
     }
     case 'text': {
@@ -1388,8 +1497,8 @@ function handleRunEvent(evt: RunEvent): void {
         box.dataset.raw = `${box.dataset.raw ?? ''}${evt.text}`;
         box.innerHTML = renderMarkdown(box.dataset.raw);
       }
-      if (card) setTaskState(card, 'thinking', 'menulis…');
-      setStatus('mengambil respons…', true);
+      if (card) setTaskState(card, 'thinking', t('console.writing'));
+      setStatus(t('console.busy'), true);
       scrollToBottom();
       break;
     }
@@ -1400,7 +1509,7 @@ function handleRunEvent(evt: RunEvent): void {
         toolItem({ id: evt.id, name: evt.name, arguments: {} })
       );
       setTaskState(card, 'tool', `memakai ${evt.name}…`);
-      setStatus(`menjalankan ${evt.name}…`, true);
+      setStatus(t('console.runningTool', { tool: evt.name }), true);
       scrollToBottom();
       break;
     }
@@ -1821,7 +1930,7 @@ async function saveSettings(): Promise<void> {
     renderModels();
     renderKeyBadge();
     setTestResult('✔ Pengaturan tersimpan', 'ok');
-    toast('Pengaturan disimpan', 'ok');
+    toast(t('settings.savedToast'), 'ok');
     closeSettings();
     renderHeader();
     renderSessions();
@@ -2259,10 +2368,10 @@ function wireEvents(): void {
   (el.sdNewSession as HTMLButtonElement).addEventListener('click', () => void newSession());
   (el.sdClearSessions as HTMLButtonElement).addEventListener('click', () => {
     if (ui.running) {
-      toast('Hentikan proses dulu', 'bad');
+      toast(t('console.stopFirst'), 'bad');
       return;
     }
-    if (!window.confirm('Hapus semua sesi dan riwayat chat?')) return;
+    if (!window.confirm(t('console.confirmClear'))) return;
     void bridge.clearSessions().then(async () => {
       await refresh();
       toast('Semua sesi dihapus', 'ok');
@@ -2571,6 +2680,7 @@ async function init(): Promise<void> {
 
   renderDocs();
   renderVoice();
+  applyLanguage();
   showScreen('console');
   await refresh();
   autosize();
@@ -2584,7 +2694,7 @@ async function init(): Promise<void> {
 
   (el.sdInput as HTMLTextAreaElement).focus();
   if (!ui.config.apiKey && !isLocalProvider(ui.config.provider)) {
-    toast('API key belum diatur — buka Pengaturan', 'bad');
+    toast(t('toast.noKey'), 'bad');
   }
 }
 

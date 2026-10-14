@@ -207,7 +207,7 @@
 
     <button id="sdWorkspaceBtn" class="sd-appbar-chip sd-chip-btn" type="button" title="Pilih folder workspace untuk tools">
       <svg class="ic ic-sm"><use href="#i-folder-plus" /></svg>
-      <span id="sdWorkspaceLabel">Pilih workspace…</span>
+      <span id="sdWorkspaceLabel" data-i18n-text="workspace.pick">Pilih workspace…</span>
     </button>
 
     <span class="sd-appbar-spacer"></span>
@@ -224,7 +224,7 @@
     <a href="#" class="sd-appbar-link" data-ext="https://adzim.my.id/privacy" title="Privasi">
       <svg class="ic ic-sm"><use href="#i-shield" /></svg> Privasi
     </a>
-    <button id="sdThemeBtn" class="sd-btn-icon" type="button" title="Ganti tema (Ctrl+Shift+D)"></button>
+    <button id="sdThemeBtn" class="sd-btn-icon" type="button" data-i18n-title="theme.toggle"></button>
   </header>
 
   <!-- ======================================================= selfdev console -->
@@ -243,12 +243,12 @@
         <button class="sd-nav-btn" type="button" data-screen="docs" title="Dokumentasi"><svg class="ic ic-sm"><use href="#i-book" /></svg></button>
       </nav>
       <div class="sd-header-tools">
-        <span id="sdStatus" class="sd-status">idle</span>
-        <button id="sdModeToggle" class="sd-mode-toggle" type="button" title="Ganti mode workspace">Kode</button>
-        <button id="sdSideToggle" class="sd-btn-icon" type="button" title="Tampilkan / sembunyikan sesi"><svg class="ic"><use href="#i-list" /></svg></button>
-        <button id="sdClearSessions" class="sd-btn-icon" type="button" title="Hapus semua sesi"><svg class="ic"><use href="#i-broom" /></svg></button>
-        <button id="sdNewSession" class="sd-btn-icon" type="button" title="Sesi baru (Ctrl+N)"><svg class="ic"><use href="#i-plus" /></svg></button>
-        <button id="sdSettingsBtn" class="sd-btn-icon" type="button" title="Pengaturan model & API (Ctrl+,)"><svg class="ic"><use href="#i-sliders" /></svg></button>
+        <span id="sdStatus" class="sd-status" data-i18n-text="console.idle">idle</span>
+        <button id="sdModeToggle" class="sd-mode-toggle" type="button" data-i18n-title="mode.picker">Kode</button>
+        <button id="sdSideToggle" class="sd-btn-icon" type="button" data-i18n-title="console.showSessions"><svg class="ic"><use href="#i-list" /></svg></button>
+        <button id="sdClearSessions" class="sd-btn-icon" type="button" data-i18n-title="console.clearSessions"><svg class="ic"><use href="#i-broom" /></svg></button>
+        <button id="sdNewSession" class="sd-btn-icon" type="button" data-i18n-title="console.newSession"><svg class="ic"><use href="#i-plus" /></svg></button>
+        <button id="sdSettingsBtn" class="sd-btn-icon" type="button" data-i18n-title="nav.settings"><svg class="ic"><use href="#i-sliders" /></svg></button>
       </div>
     </header>
 
@@ -256,7 +256,7 @@
     <div class="sd-layout">
       <aside id="sdSidebar" class="sd-sidebar" aria-label="Sessions">
         <div class="sd-sidebar-head">
-          <span class="sd-sidebar-title">Sessions</span>
+          <span class="sd-sidebar-title" data-i18n-text="console.sessions">Sessions</span>
           <span id="sdSessionCount" class="sd-sidebar-count">0</span>
         </div>
         <div id="sdSessionList"></div>
@@ -269,24 +269,24 @@
           <div id="sdToolsBar" class="sd-toolsbar"></div>
           <div id="sdAttachStrip" class="sd-attach-strip" hidden></div>
           <div class="sd-input-row">
-            <button id="sdAttachBtn" class="sd-btn-icon" type="button" title="Lampirkan berkas">
+            <button id="sdAttachBtn" class="sd-btn-icon" type="button" data-i18n-title="composer.attach">
               <svg class="ic"><use href="#i-plus" /></svg>
             </button>
             <div id="sdToolPop" class="sd-toolpop" role="listbox"></div>
             <textarea
               id="sdInput"
               rows="1"
-              placeholder="Tanya apa saja, atau ketik @ untuk memakai tools… (Enter kirim, Shift+Enter baris baru)"
+             
               aria-label="Pesan"
-              spellcheck="false"
-            ></textarea>
-            <button id="sdMic" class="sd-btn-icon" type="button" title="Dikte"><svg class="ic"><use href="#i-mic" /></svg></button>
-            <button id="sdSpeak" class="sd-btn-icon" type="button" title="Bacakan jawaban terakhir" hidden><svg class="ic"><use href="#i-speaker" /></svg></button>
-            <button id="sdStop" class="sd-btn-stop" type="button" title="Hentikan"><svg class="ic"><use href="#i-stop" /></svg></button>
-            <button id="sdSend" class="sd-btn-send" type="button" title="Kirim"><svg class="ic"><use href="#i-send" /></svg></button>
+              spellcheck="false" data-i18n-placeholder="composer.placeholder"></textarea>
+            <button id="sdMic" class="sd-btn-icon" type="button" data-i18n-title="composer.mic"><svg class="ic"><use href="#i-mic" /></svg></button>
+            <button id="sdSpeak" class="sd-btn-icon" type="button" hidden data-i18n-title="composer.speak"><svg class="ic"><use href="#i-speaker" /></svg></button>
+            <button id="sdStop" class="sd-btn-stop" type="button" data-i18n-title="composer.stop"><svg class="ic"><use href="#i-stop" /></svg></button>
+            <button id="sdSend" class="sd-btn-send" type="button" data-i18n-title="composer.send"><svg class="ic"><use href="#i-send" /></svg></button>
           </div>
           <div id="sdHint" class="sd-hint">
-            <b>Enter</b> kirim · <b>Shift+Enter</b> baris baru · <b>@</b> sisipkan tool · model: <b id="sdModelLabel">—</b>
+            <span data-i18n-html="composer.hint" data-vars='{"send":"Enter","newline":"Shift+Enter","at":"@"}'></span>
+            · <span data-i18n-text="composer.tool"></span>: <b id="sdModelLabel">—</b>
             <span id="sdWsHint"></span>
           </div>
         </div>
@@ -297,11 +297,11 @@
     <!-- ============================================================== projects -->
     <section id="screenProjects" class="sd-screen sd-page" data-screen-body="projects" hidden>
       <div class="sd-page-head">
-        <h2>Proyek</h2>
-        <p>Sesi dikelompokkan per proyek. Pilih satu untuk memfilter sidebar, atau biarkan kosong untuk workspace bebas.</p>
+        <h2 data-i18n-text="projects.title">Proyek</h2>
+        <p data-i18n-text="projects.lead">Sesi dikelompokkan per proyek. Pilih satu untuk memfilter sidebar, atau biarkan kosong untuk workspace bebas.</p>
         <div class="sd-btn-row">
-          <button id="sdProjectNew" class="sd-btn sd-btn-primary sd-btn-sm" type="button"><svg class="ic ic-sm"><use href="#i-plus" /></svg> Proyek baru</button>
-          <button id="sdProjectAll" class="sd-btn sd-btn-outline sd-btn-sm" type="button">Semua sesi</button>
+          <button id="sdProjectNew" class="sd-btn sd-btn-primary sd-btn-sm" type="button" data-i18n-text="projects.new"><svg class="ic ic-sm"><use href="#i-plus" /></svg> Proyek baru</button>
+          <button id="sdProjectAll" class="sd-btn sd-btn-outline sd-btn-sm" type="button" data-i18n-text="projects.all">Semua sesi</button>
         </div>
       </div>
       <div id="sdProjectList" class="sd-project-list"></div>
@@ -310,25 +310,25 @@
     <!-- ============================================================== dispatch -->
     <section id="screenDispatch" class="sd-screen sd-page" data-screen-body="dispatch" hidden>
       <div class="sd-page-head">
-        <h2>Kirim berkas</h2>
-        <p>Berkas dibaca di perangkat ini lalu isinya dikirim ke model. Teks, PDF, DOCX, dan CSV diekstrak; gambar dikirim apa adanya.</p>
+        <h2 data-i18n-text="dispatch.title">Kirim berkas</h2>
+        <p data-i18n-text="dispatch.lead">Berkas dibaca di perangkat ini lalu isinya dikirim ke model. Teks, PDF, DOCX, dan CSV diekstrak; gambar dikirim apa adanya.</p>
       </div>
 
       <div class="sd-dispatch-form">
         <div class="sd-dispatch-files">
-          <button id="sdDispatchPick" class="sd-btn sd-btn-outline sd-btn-sm" type="button">
+          <button id="sdDispatchPick" class="sd-btn sd-btn-outline sd-btn-sm" type="button" data-i18n-text="dispatch.pick">
             <svg class="ic ic-sm"><use href="#i-folder-plus" /></svg> Pilih berkas
           </button>
-          <button id="sdDispatchClear" class="sd-btn sd-btn-outline sd-btn-sm" type="button" hidden>Bersihkan</button>
+          <button id="sdDispatchClear" class="sd-btn sd-btn-outline sd-btn-sm" type="button" hidden data-i18n-text="dispatch.clear">Bersihkan</button>
           <span id="sdDispatchSummary" class="sd-badge">0 berkas</span>
         </div>
         <div id="sdDispatchList" class="sd-dispatch-list"></div>
         <div class="sd-field">
           <label for="sdDispatchPrompt">Instruksi</label>
-          <textarea id="sdDispatchPrompt" rows="3" spellcheck="false" placeholder="Ringkas dokumen ini dan sebutkan bagian mana yang paling penting"></textarea>
+          <textarea id="sdDispatchPrompt" rows="3" spellcheck="false" data-i18n-placeholder="dispatch.promptPlaceholder"></textarea>
         </div>
         <div class="sd-btn-row">
-          <button id="sdDispatchSend" class="sd-btn sd-btn-primary sd-btn-sm" type="button" disabled>
+          <button id="sdDispatchSend" class="sd-btn sd-btn-primary sd-btn-sm" type="button" disabled data-i18n-text="dispatch.send">
             <svg class="ic ic-sm"><use href="#i-send" /></svg> Proses di console
           </button>
           <span id="sdDispatchStatus" class="sd-badge" hidden></span>
@@ -340,27 +340,27 @@
     <!-- ================================================================ images -->
     <section id="screenImages" class="sd-screen sd-page" data-screen-body="images" hidden>
       <div class="sd-page-head">
-        <h2>Buat gambar</h2>
-        <p>Endpoint image OpenAI dan endpoint Imagen / Gemini. Hasilnya disimpan ke disk dari tombol Simpan.</p>
+        <h2 data-i18n-text="images.title">Buat gambar</h2>
+        <p data-i18n-text="images.lead">Endpoint image OpenAI dan endpoint Imagen / Gemini. Hasilnya disimpan ke disk dari tombol Simpan.</p>
       </div>
 
       <div class="sd-image-form">
         <div class="sd-field">
           <label for="sdImgModel">Model gambar</label>
-          <select id="sdImgModel"></select>
+          <select id="sdImgModel" data-i18n-text="images.model"></select>
           <small class="sd-field-note" id="sdImgModelNote">—</small>
         </div>
         <div class="sd-field">
           <label for="sdImgPrompt">Prompt</label>
-          <textarea id="sdImgPrompt" rows="3" spellcheck="false" placeholder="Ilustrasi teknis blog tentang developer tools, gaya flat, palet biru"></textarea>
+          <textarea id="sdImgPrompt" rows="3" spellcheck="false" data-i18n-placeholder="images.promptPlaceholder" data-i18n-text="images.prompt"></textarea>
         </div>
         <div class="sd-field">
-          <label>Ukuran</label>
+          <label data-i18n-text="images.size">Ukuran</label>
           <div id="sdImgSizes" class="sd-pills"></div>
         </div>
         <div class="sd-btn-row">
-          <button id="sdImgRun" class="sd-btn sd-btn-primary sd-btn-sm" type="button"><svg class="ic ic-sm"><use href="#i-sparkle" /></svg> Buat gambar</button>
-          <button id="sdImgCancel" class="sd-btn sd-btn-outline sd-btn-sm" type="button" hidden>Batalkan</button>
+          <button id="sdImgRun" class="sd-btn sd-btn-primary sd-btn-sm" type="button" data-i18n-text="images.run"><svg class="ic ic-sm"><use href="#i-sparkle" /></svg> Buat gambar</button>
+          <button id="sdImgCancel" class="sd-btn sd-btn-outline sd-btn-sm" type="button" hidden data-i18n-text="images.cancel">Batalkan</button>
           <span id="sdImgStatus" class="sd-badge" hidden></span>
         </div>
       </div>
@@ -370,8 +370,8 @@
     <!-- ================================================================== docs -->
     <section id="screenDocs" class="sd-screen sd-page" data-screen-body="docs" hidden>
       <div class="sd-page-head">
-        <h2>Dokumentasi</h2>
-        <p>Jawaban cepat untuk hal yang paling sering ditanya.</p>
+        <h2 data-i18n-text="docs.title">Dokumentasi</h2>
+        <p data-i18n-text="docs.lead">Jawaban cepat untuk hal yang paling sering ditanya.</p>
       </div>
       <div id="sdDocsList" class="sd-docs-list"></div>
     </section>
@@ -398,13 +398,13 @@
     <div class="sd-modal-head">
       <h3>
         <span class="sd-mark sd-mark-modal" data-mark></span>
-        <span id="sdSettingsTitle">Pengaturan</span>
+        <span id="sdSettingsTitle" data-i18n-text="settings.title">Pengaturan</span>
       </h3>
       <span id="sdSettingsLock" class="sd-lock" hidden title="Proses sedang berjalan">
         <span class="sd-spin"><svg class="ic ic-sm"><use href="#i-spinner" /></svg></span>
         <span id="sdSettingsLockText">memproses…</span>
       </span>
-      <button id="sdSettingsClose" class="sd-modal-close" type="button" aria-label="Tutup"><svg class="ic"><use href="#i-close" /></svg></button>
+      <button id="sdSettingsClose" class="sd-modal-close" type="button" data-i18n-aria-label="settings.close"><svg class="ic"><use href="#i-close" /></svg></button>
     </div>
 
     <div class="sd-settings-scroll">
@@ -414,7 +414,7 @@
         <button class="sd-sec-head" type="button" aria-expanded="true">
           <span class="sd-sec-icon"><svg class="ic"><use href="#i-sliders" /></svg></span>
           <span class="sd-sec-text">
-            <span class="sd-sec-title">Provider</span>
+            <span class="sd-sec-title" data-i18n-text="section.provider">Provider</span>
             <span class="sd-sec-sub" id="sdProviderSub">—</span>
           </span>
           <span class="sd-sec-chev"><svg class="ic"><use href="#i-chevron" /></svg></span>
@@ -424,13 +424,13 @@
           <div id="sdCustomWrap" class="sd-sub" hidden>
             <div class="sd-field">
               <label for="sdCustomBaseUrl">Base URL</label>
-              <input id="sdCustomBaseUrl" type="text" placeholder="http://localhost:11434/v1" spellcheck="false" autocomplete="off" />
-              <small class="sd-field-note">Endpoint OpenAI-compatible. Skema otomatis ditambahkan bila belum ada.</small>
+              <input id="sdCustomBaseUrl" type="text" spellcheck="false" autocomplete="off" / data-i18n-placeholder="provider.baseUrlPlaceholder" data-i18n-text="provider.baseUrl">
+              <small class="sd-field-note" data-i18n-text="provider.baseUrlHint">Endpoint OpenAI-compatible. Skema otomatis ditambahkan bila belum ada.</small>
             </div>
             <div class="sd-field">
-              <label>Format wire</label>
+              <label data-i18n-text="provider.wire">Format wire</label>
               <div id="sdWirePills" class="sd-pills sd-pills-wire" role="radiogroup" aria-label="Format wire"></div>
-              <small class="sd-field-note">Pilih format yang berbicara dengan gateway. Default OpenAI Chat; gateway yang prototyping Claude atau Gemini butuh format yang sesuai.</small>
+              <small class="sd-field-note" data-i18n-text="provider.wireHint">Pilih format yang berbicara dengan gateway. Default OpenAI Chat; gateway yang prototyping Claude atau Gemini butuh format yang sesuai.</small>
             </div>
           </div>
         </div>
@@ -441,7 +441,7 @@
         <button class="sd-sec-head" type="button" aria-expanded="true">
           <span class="sd-sec-icon"><svg class="ic"><use href="#i-lock" /></svg></span>
           <span class="sd-sec-text">
-            <span class="sd-sec-title">API Key</span>
+            <span class="sd-sec-title" data-i18n-text="section.security">API Key</span>
             <span class="sd-sec-sub" id="sdKeySub">—</span>
           </span>
           <span class="sd-sec-chev"><svg class="ic"><use href="#i-chevron" /></svg></span>
@@ -451,18 +451,18 @@
           <div class="sd-field">
             <label for="sdApiKey">API Key</label>
             <div class="sd-input-wrap">
-              <input id="sdApiKey" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false" />
-              <button id="sdKeyToggle" class="sd-input-action" type="button" aria-label="Tampilkan key" title="Tampilkan / sembunyikan">
+              <input id="sdApiKey" type="password" autocomplete="off" spellcheck="false" / data-i18n-placeholder="key.placeholder" data-i18n-text="key.label">
+              <button id="sdKeyToggle" class="sd-input-action" type="button" aria-label="Tampilkan key" data-i18n-title="key.show">
                 <svg class="ic ic-sm"><use href="#i-eye" /></svg>
               </button>
             </div>
             <small class="sd-field-note" id="sdKeyNote">Disimpan lokal di perangkat ini. Tidak pernah dikirim ke server kami.</small>
           </div>
           <div class="sd-btn-row">
-            <button id="sdSave" class="sd-btn sd-btn-primary" type="button"><svg class="ic ic-sm"><use href="#i-check" /></svg> Simpan</button>
-            <button id="sdTest" class="sd-btn sd-btn-outline" type="button"><svg class="ic ic-sm"><use href="#i-speed" /></svg> Tes Koneksi</button>
+            <button id="sdSave" class="sd-btn sd-btn-primary" type="button" data-i18n-text="settings.save"><svg class="ic ic-sm"><use href="#i-check" /></svg> Simpan</button>
+            <button id="sdTest" class="sd-btn sd-btn-outline" type="button" data-i18n-text="settings.test"><svg class="ic ic-sm"><use href="#i-speed" /></svg> Tes Koneksi</button>
           </div>
-          <button id="sdKeyClear" class="sd-link-danger" type="button" hidden>Hapus API key tersimpan</button>
+          <button id="sdKeyClear" class="sd-link-danger" type="button" hidden data-i18n-title="key.clear">Hapus API key tersimpan</button>
           <div id="sdNotice" class="sd-notice" hidden>
             <span id="sdNoticeIcon" class="sd-notice-icon"></span>
             <span id="sdNoticeText" class="sd-notice-text"></span>
@@ -477,14 +477,14 @@
         <button class="sd-sec-head" type="button" aria-expanded="true">
           <span class="sd-sec-icon"><svg class="ic"><use href="#i-memory" /></svg></span>
           <span class="sd-sec-text">
-            <span class="sd-sec-title">Model</span>
+            <span class="sd-sec-title" data-i18n-text="section.model">Model</span>
             <span class="sd-sec-sub" id="sdModelSub">—</span>
           </span>
           <span class="sd-sec-chev"><svg class="ic"><use href="#i-chevron" /></svg></span>
         </button>
         <div class="sd-sec-body">
           <div class="sd-btn-row">
-            <button id="sdFetchModels" class="sd-btn sd-btn-outline sd-btn-sm" type="button">
+            <button id="sdFetchModels" class="sd-btn sd-btn-outline sd-btn-sm" type="button" data-i18n-text="model.fetch">
               <svg class="ic ic-sm"><use href="#i-refresh" /></svg> Ambil daftar model
             </button>
             <span id="sdModelCount" class="sd-badge" hidden></span>
@@ -492,7 +492,7 @@
           <div class="sd-field">
             <label for="sdModel">Model</label>
             <div class="sd-input-wrap">
-              <input id="sdModel" type="text" list="sdModelList" placeholder="llama-3.3-70b-versatile" spellcheck="false" autocomplete="off" />
+              <input id="sdModel" type="text" list="sdModelList" spellcheck="false" autocomplete="off" / data-i18n-placeholder="model.placeholder" data-i18n-text="model.label">
               <button id="sdModelAdd" class="sd-input-action sd-input-action-text" type="button" hidden>tambah</button>
             </div>
             <datalist id="sdModelList"></datalist>
@@ -512,27 +512,27 @@
         <button class="sd-sec-head" type="button" aria-expanded="false">
           <span class="sd-sec-icon"><svg class="ic"><use href="#i-sparkle" /></svg></span>
           <span class="sd-sec-text">
-            <span class="sd-sec-title">Prompt &amp; Batas</span>
-            <span class="sd-sec-sub">system prompt, max tokens, temperature</span>
+            <span class="sd-sec-title" data-i18n-text="section.prompt">Prompt &amp; Batas</span>
+            <span class="sd-sec-sub"></span>
           </span>
           <span class="sd-sec-chev"><svg class="ic"><use href="#i-chevron" /></svg></span>
         </button>
         <div class="sd-sec-body">
           <div class="sd-field">
             <label for="sdSystem">System Prompt</label>
-            <textarea id="sdSystem" rows="4" spellcheck="false"></textarea>
+            <textarea id="sdSystem" rows="4" spellcheck="false" data-i18n-text="prompt.label"></textarea>
           </div>
           <div class="sd-field-row">
             <div class="sd-field">
               <label for="sdMaxTokens">Max Tokens</label>
-              <input id="sdMaxTokens" type="number" min="1" max="4096" step="128" value="2048" />
+              <input id="sdMaxTokens" type="number" min="1" max="4096" step="128" value="2048" / data-i18n-text="prompt.maxTokens">
             </div>
             <div class="sd-field">
               <label for="sdTemp">Temperature</label>
-              <input id="sdTemp" type="number" min="0" max="2" step="0.1" value="0.6" />
+              <input id="sdTemp" type="number" min="0" max="2" step="0.1" value="0.6" / data-i18n-text="prompt.temperature">
             </div>
           </div>
-          <small class="sd-field-note">Temperature dikirim ke provider OpenAI-compatible; Anthropic dan Gemini memakai nilai bawaan mereka.</small>
+          <small class="sd-field-note" data-i18n-text="prompt.hint">Temperature dikirim ke provider OpenAI-compatible; Anthropic dan Gemini memakai nilai bawaan mereka.</small>
         </div>
       </section>
 
@@ -541,19 +541,23 @@
         <button class="sd-sec-head" type="button" aria-expanded="false">
           <span class="sd-sec-icon"><svg class="ic"><use href="#i-sun" /></svg></span>
           <span class="sd-sec-text">
-            <span class="sd-sec-title">Tampilan</span>
+            <span class="sd-sec-title" data-i18n-text="section.display">Tampilan</span>
             <span class="sd-sec-sub" id="sdThemeSub">—</span>
           </span>
           <span class="sd-sec-chev"><svg class="ic"><use href="#i-chevron" /></svg></span>
         </button>
         <div class="sd-sec-body">
+          <div class="sd-field">
+            <label id="sdLangLabel">Bahasa</label>
+            <div id="sdLangPills" class="sd-pills sd-pills-wire" role="radiogroup" aria-label="Bahasa"></div>
+          </div>
           <div class="sd-pills">
             <button id="sdThemeLight" class="sd-pill" type="button"><svg class="ic ic-sm"><use href="#i-sun" /></svg> Terang</button>
             <button id="sdThemeDark" class="sd-pill" type="button"><svg class="ic ic-sm"><use href="#i-moon" /></svg> Gelap</button>
             <button id="sdModeDev" class="sd-pill" type="button"><svg class="ic ic-sm"><use href="#i-terminal" /></svg> Dev</button>
             <button id="sdModePlan" class="sd-pill" type="button"><svg class="ic ic-sm"><use href="#i-book" /></svg> Plan</button>
           </div>
-          <small class="sd-field-note">Mode Dev mengaktifkan tools lokal; Plan hanya tanya-jawab.</small>
+          <small class="sd-field-note" data-i18n-text="display.modeHint">Mode Dev mengaktifkan tools lokal; Plan hanya tanya-jawab.</small>
         </div>
       </section>
 
@@ -562,7 +566,7 @@
         <button class="sd-sec-head" type="button" aria-expanded="false">
           <span class="sd-sec-icon"><svg class="ic"><use href="#i-speaker" /></svg></span>
           <span class="sd-sec-text">
-            <span class="sd-sec-title">Suara</span>
+            <span class="sd-sec-title" data-i18n-text="section.voice">Suara</span>
             <span class="sd-sec-sub" id="sdVoiceSub">dikte &amp; bacakan jawaban</span>
           </span>
           <span class="sd-sec-chev"><svg class="ic"><use href="#i-chevron" /></svg></span>
@@ -574,21 +578,21 @@
           </div>
           <label class="sd-check">
             <input id="sdSpeakReplies" type="checkbox" />
-            <span>Automatis bacakan jawaban</span>
+            <span data-i18n-text="voice.speakReplies">Automatis bacakan jawaban</span>
           </label>
           <label class="sd-check">
             <input id="sdReadCode" type="checkbox" />
-            <span>Baca blok kode juga (defaultnya dilewati)</span>
+            <span data-i18n-text="voice.readCode">Baca blok kode juga (defaultnya dilewati)</span>
           </label>
           <div class="sd-field" style="margin-top:.6rem">
             <label for="sdVoice">Suara</label>
-            <select id="sdVoice"></select>
+            <select id="sdVoice" data-i18n-text="voice.picker"></select>
           </div>
           <div class="sd-btn-row">
-            <button id="sdVoiceTest" class="sd-btn sd-btn-outline sd-btn-sm" type="button"><svg class="ic ic-sm"><use href="#i-speaker" /></svg> Uji suara</button>
-            <button id="sdVoiceStop" class="sd-btn sd-btn-outline sd-btn-sm" type="button" hidden>Berhenti</button>
+            <button id="sdVoiceTest" class="sd-btn sd-btn-outline sd-btn-sm" type="button" data-i18n-text="voice.test"><svg class="ic ic-sm"><use href="#i-speaker" /></svg> Uji suara</button>
+            <button id="sdVoiceStop" class="sd-btn sd-btn-outline sd-btn-sm" type="button" hidden data-i18n-text="voice.stop">Berhenti</button>
           </div>
-          <small class="sd-field-note">Pakai mesin suara sistem operasi. Mikrofon memakai layanan pengenalan suara browser dan tidak selalu tersedia di desktop.</small>
+          <small class="sd-field-note" data-i18n-text="voice.note">Pakai mesin suara sistem operasi. Mikrofon memakai layanan pengenalan suara browser dan tidak selalu tersedia di desktop.</small>
         </div>
       </section>
 
@@ -597,8 +601,8 @@
         <button class="sd-sec-head" type="button" aria-expanded="false">
           <span class="sd-sec-icon"><svg class="ic"><use href="#i-cloud" /></svg></span>
           <span class="sd-sec-text">
-            <span class="sd-sec-title">Backup</span>
-            <span class="sd-sec-sub">ekspor &amp; restore pengaturan, sesi, proyek</span>
+            <span class="sd-sec-title" data-i18n-text="section.backup">Backup</span>
+            <span class="sd-sec-sub"></span>
           </span>
           <span class="sd-sec-chev"><svg class="ic"><use href="#i-chevron" /></svg></span>
         </button>
@@ -606,19 +610,19 @@
           <div class="sd-field">
             <label for="sdBackupPass">Passphrase</label>
             <div class="sd-input-wrap">
-              <input id="sdBackupPass" type="password" placeholder="Dipakai untuk mengenkripsi berkas" autocomplete="off" spellcheck="false" />
-              <button id="sdBackupToggle" class="sd-input-action" type="button" aria-label="Tampilkan passphrase"><svg class="ic ic-sm"><use href="#i-eye" /></svg></button>
+              <input id="sdBackupPass" type="password" placeholder="Dipakai untuk mengenkripsi berkas" autocomplete="off" spellcheck="false" / data-i18n-text="backup.passphrase">
+              <button id="sdBackupToggle" class="sd-input-action" type="button" aria-label="Tampilkan passphrase" data-i18n-title="backup.passphrase"><svg class="ic ic-sm"><use href="#i-eye" /></svg></button>
             </div>
-            <small class="sd-field-note">Backup dienkripsi AES-256-GCM. Tanpa passphrase yang benar, isinya tidak bisa dibaca — dan tidak ada jalan memulihkannya.</small>
+            <small class="sd-field-note" data-i18n-text="backup.passphraseHint">Backup dienkripsi AES-256-GCM. Tanpa passphrase yang benar, isinya tidak bisa dibaca — dan tidak ada jalan memulihkannya.</small>
           </div>
           <label class="sd-check">
             <input id="sdBackupKey" type="checkbox" />
-            <span>Sertakan API key di backup</span>
+            <span data-i18n-text="backup.includeKey">Sertakan API key di backup</span>
           </label>
-          <small class="sd-field-note">Default-nya tidak: backup yang dibagikan tidak ikut membawa kredensial.</small>
+          <small class="sd-field-note" data-i18n-text="backup.includeKeyHint">Default-nya tidak: backup yang dibagikan tidak ikut membawa kredensial.</small>
           <div class="sd-btn-row" style="margin-top:0.6rem">
-            <button id="sdBackupExport" class="sd-btn sd-btn-outline sd-btn-sm" type="button"><svg class="ic ic-sm"><use href="#i-download" /></svg> Ekspor</button>
-            <button id="sdBackupImport" class="sd-btn sd-btn-outline sd-btn-sm" type="button"><svg class="ic ic-sm"><use href="#i-folder-open" /></svg> Restore</button>
+            <button id="sdBackupExport" class="sd-btn sd-btn-outline sd-btn-sm" type="button" data-i18n-text="backup.export"><svg class="ic ic-sm"><use href="#i-download" /></svg> Ekspor</button>
+            <button id="sdBackupImport" class="sd-btn sd-btn-outline sd-btn-sm" type="button" data-i18n-text="backup.restore"><svg class="ic ic-sm"><use href="#i-folder-open" /></svg> Restore</button>
           </div>
           <div id="sdBackupResult" class="sd-test-result" role="status" aria-live="polite"></div>
         </div>
@@ -629,8 +633,8 @@
         <button class="sd-sec-head" type="button" aria-expanded="false">
           <span class="sd-sec-icon"><svg class="ic"><use href="#i-info" /></svg></span>
           <span class="sd-sec-text">
-            <span class="sd-sec-title">Informasi</span>
-            <span class="sd-sec-sub">build, penyimpanan, pembaruan</span>
+            <span class="sd-sec-title" data-i18n-text="section.info">Informasi</span>
+            <span class="sd-sec-sub"></span>
           </span>
           <span class="sd-sec-chev"><svg class="ic"><use href="#i-chevron" /></svg></span>
         </button>
@@ -644,7 +648,7 @@
             <label>Pembaruan aplikasi</label>
             <div class="sd-update-row">
               <span id="sdUpdateVersion" class="sd-update-version">—</span>
-              <button id="sdUpdateCheck" class="sd-btn sd-btn-outline sd-btn-sm" type="button">
+              <button id="sdUpdateCheck" class="sd-btn sd-btn-outline sd-btn-sm" type="button" data-i18n-text="info.checkUpdate">
                 <svg class="ic ic-sm"><use href="#i-refresh" /></svg> Periksa pembaruan
               </button>
             </div>
@@ -656,7 +660,7 @@
     </div>
 
     <div class="sd-modal-actions">
-      <button id="sdSaveMain" class="sd-btn sd-btn-primary" type="button"><svg class="ic ic-sm"><use href="#i-check" /></svg> Simpan Pengaturan</button>
+      <button id="sdSaveMain" class="sd-btn sd-btn-primary" type="button" data-i18n-text="settings.saveAll"><svg class="ic ic-sm"><use href="#i-check" /></svg> Simpan Pengaturan</button>
     </div>
   </div>
 </div>
@@ -668,8 +672,8 @@
 <div id="screenWelcome" class="sd-welcome" role="dialog" aria-modal="true" aria-labelledby="sdWelcomeTitle" hidden>
   <div class="sd-welcome-inner">
     <div class="sd-welcome-mark" data-mark="welcome"></div>
-    <h1 id="sdWelcomeTitle">Selamat datang di SelfDev</h1>
-    <p class="sd-welcome-lead">
+    <h1 id="sdWelcomeTitle" data-i18n-text="welcome.title">Selamat datang di SelfDev</h1>
+    <p class="sd-welcome-lead"> data-i18n-text="welcome.lead"
       Asisten coding opencode-style di desktop Anda. API key Anda sendiri, tools lokal,
       tidak ada server di tengah.
     </p>
@@ -691,10 +695,10 @@
       </div>
     </div>
     <div class="sd-welcome-actions">
-      <button id="sdWelcomeStart" class="sd-btn sd-btn-primary" type="button"><svg class="ic ic-sm"><use href="#i-check" /></svg> Mulai — atur API</button>
-      <button id="sdWelcomeSkip" class="sd-btn sd-btn-outline" type="button">Lewati dulu</button>
+      <button id="sdWelcomeStart" class="sd-btn sd-btn-primary" type="button" data-i18n-text="welcome.start"><svg class="ic ic-sm"><use href="#i-check" /></svg> Mulai — atur API</button>
+      <button id="sdWelcomeSkip" class="sd-btn sd-btn-outline" type="button" data-i18n-text="welcome.skip">Lewati dulu</button>
     </div>
-    <small class="sd-welcome-note">Bisa diubah kapan saja di Pengaturan.</small>
+    <small class="sd-welcome-note"> data-i18n-text="welcome.note"Bisa diubah kapan saja di Pengaturan.</small>
   </div>
 </div>
 

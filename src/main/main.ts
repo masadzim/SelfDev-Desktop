@@ -263,6 +263,14 @@ async function runSmokeTest(get: () => BrowserWindow | null): Promise<void> {
         out.toolChips = $('sdToolsBar').querySelectorAll('[data-tool]').length;
         out.iconsRendered = document.querySelectorAll('svg use').length;
         out.marks = [...document.querySelectorAll('.sd-mark svg')].map((s) => Math.round(s.getBoundingClientRect().width)).filter((w) => w > 0).length;
+        out.langPills = document.querySelectorAll('[data-lang]').length;
+        // A malformed tag anywhere in the document silently swallows the rest of
+        // the subtree, so every chrome control has to still be reachable.
+        out.chromeControls = ['sdSettingsBtn','sdSend','sdAttachBtn','sdMic','sdStop','sdModeToggle','sdSideToggle',
+          'sdClearSessions','sdNewSession','sdThemeBtn','sdWorkspaceBtn','sdSettingsClose','sdSaveMain','sdSave',
+          'sdTest','sdFetchModels','sdProviderList','sdModelListBox','sdApiKey','sdCustomBaseUrl','sdWirePills',
+          'sdLangPills','sdVoice','sdBackupPass','sdProjectList','sdDocsList','sdImgModel','sdImgSizes']
+          .filter((id) => !!$(id)).length;
         out.markGradients = document.querySelectorAll('[id^="sdLogoGradient"]').length;
         out.themeBtn = !!$('sdThemeBtn').querySelector('use');
         out.navButtons = document.querySelectorAll('[data-screen]').length;
@@ -316,6 +324,9 @@ async function runSmokeTest(get: () => BrowserWindow | null): Promise<void> {
     if (!p.dispatchScreen) fail('dispatch screen missing');
     if (!p.imageScreen) fail('image screen missing');
     if (!p.welcomeScreen) fail('welcome screen missing');
+    if ((p.langPills as number) !== 2) fail(`language switcher missing (${p.langPills})`);
+    // 28 chrome controls; a short count means a tag swallowed part of the document.
+    if ((p.chromeControls as number) < 28) fail(`only ${p.chromeControls}/28 chrome controls reachable — markup is malformed`);
     if (!String(p.modeLabel ?? '').trim()) fail('workspace mode label empty');
     if (state?.config?.model === undefined) fail('config.model missing');
     const geom = p.geom as Record<string, { w: number; h: number } | null>;
@@ -532,8 +543,7 @@ async function runSmokeSettings(
       // Escape must NOT close while a request is in flight.
       $('sdSettingsBtn').click();
       await wait(200);
-      const custom = modal.querySelector('#sdProviderList [data-provider="custom"]');
-      custom.click();
+      modal.querySelector('#sdProviderList [data-provider="custom"]')?.click();
       await wait(80);
       $('sdCustomBaseUrl').value = ${JSON.stringify(mockBase)} + '/slow';
       ${JSON.stringify(process.env.SELFDEV_MOCK_WIRE_API ?? 'OPENAI_CHAT')} === 'ANTHROPIC_MESSAGES'
@@ -558,6 +568,22 @@ async function runSmokeSettings(
       await wait(80);
       out.escapeClosesAfterTest = !modal.classList.contains('open');
 
+      // Language switch: the whole dialog has to follow, not just a few labels.
+      out.titleBeforeLang = $('sdSettingsTitle').textContent;
+      document.querySelector('[data-lang="en"]').click();
+      await wait(600);
+      out.titleAfterLang = $('sdSettingsTitle').textContent;
+      out.htmlLang = document.documentElement.lang;
+      out.saveLabelEn = $('sdSaveMain').textContent.trim();
+      out.sendTitleEn = $('sdSend').getAttribute('title');
+      out.docsTitleEn = (() => {
+        document.querySelector('[data-screen="docs"]').click();
+        const first = $('sdDocsList').querySelector('.sd-doc-head span');
+        const title = first ? first.textContent : '';
+        document.querySelector('[data-screen="console"]').click();
+        return title;
+      })();
+
       // Left open on the custom-provider block for the screenshot.
       $('sdSettingsBtn').click();
       await wait(200);
@@ -570,9 +596,32 @@ async function runSmokeSettings(
     })()
   `;
 
+  // The dialog is left open in English for the screenshot, then switched back by
+  // the caller once the frame has been grabbed.
+  const englishScript = script;
+
   let result: Record<string, unknown>;
   try {
-    result = (await win.webContents.executeJavaScript(script, true)) as Record<string, unknown>;
+    result = (await win.webContents.executeJavaScript(englishScript, true)) as Record<string, unknown>;
+    try {
+      // capturePage grabs the last composited frame, so give the repaint a beat.
+      await new Promise((r) => setTimeout(r, 600));
+      const shot = await win.webContents.capturePage();
+      await fsPromises.writeFile(process.env.SELFDEV_SHOT_EN ?? '/tmp/opencode/selfdev-en.png', shot.toPNG());
+    } catch {
+      /* best effort */
+    }
+    result.titleBackToId = (
+      await win.webContents.executeJavaScript(
+        `(async () => {
+           const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+           document.querySelector('[data-lang="id"]').click();
+           await wait(500);
+           return document.getElementById('sdSettingsTitle').textContent;
+         })()`,
+        true
+      )
+    ) as string;
   } catch (err) {
     return { checks, problems: [`settings: renderer threw ${err instanceof Error ? err.message : String(err)}`] };
   }
@@ -598,6 +647,18 @@ async function runSmokeSettings(
   );
   expect(result.escapeClosesAfterTest === true, 'settings: Escape did not close after a finished test');
   expect(Number(result.wirePills) === 3, `settings: expected 3 wire formats, got ${result.wirePills}`);
+  expect(
+    result.titleBeforeLang !== result.titleAfterLang,
+    `settings: language switch did not change the title (${result.titleBeforeLang} -> ${result.titleAfterLang})`
+  );
+  expect(result.htmlLang === 'en', `settings: html lang is ${result.htmlLang}`);
+  expect(/save/i.test(String(result.saveLabelEn)), `settings: save button not translated (${result.saveLabelEn})`);
+  expect(/send/i.test(String(result.sendTitleEn)), `settings: send title not translated (${result.sendTitleEn})`);
+  expect(
+    !/[\u0080-\u024f]/.test(String(result.docsTitleEn)),
+    `settings: docs not translated (${result.docsTitleEn})`
+  );
+  expect(result.titleBackToId === result.titleBeforeLang, 'settings: language did not switch back');
 
   return { checks: result, problems };
 }

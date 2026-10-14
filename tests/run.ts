@@ -74,7 +74,8 @@ import {
 } from '../src/shared/imagegen';
 import { EXTENSION, FORMAT, VERSION, buildPayload, parsePayload, suggestedFilename } from '../src/shared/backupFormat';
 import { sealPayload, openPayload } from '../src/main/backup';
-import { DOCS } from '../src/shared/docs';
+import { DOCS, docsFor } from '../src/shared/docs';
+import { LANGUAGES, isUntranslated, keys as i18nKeys, translate } from '../src/shared/i18n';
 import { composeAttachmentText, humanBytes, messageFor } from '../src/shared/attachments';
 import { CHUNK_LIMIT, chunks, fromMarkdown } from '../src/shared/spokenText';
 import { extractFile, kindFor, mimeFor } from '../src/main/tools/extract';
@@ -1259,9 +1260,40 @@ section('backup format');
 section('docs content');
 {
   eq('docs sections', DOCS.length, 8);
-  check('every section has a body', DOCS.every((d) => d.body.length > 0), 'empty section');
-  check('every section has a title', DOCS.every((d) => d.title.trim().length > 4), 'untitled section');
-  check('answers name the providers this build ships', DOCS.some((d) => d.title.includes('Provider')), 'no provider entry');
+  for (const lang of ['id', 'en'] as const) {
+    const sections = docsFor(lang);
+    check(`${lang}: every section has a body`, sections.every((d) => d.body.length > 0), 'empty section');
+    check(`${lang}: every section has a title`, sections.every((d) => d.title.trim().length > 4), 'untitled section');
+    check(`${lang}: no placeholder leaked`, sections.every((d) => !d.title.includes('{')), 'untranslated placeholder');
+  }
+  check('answers name the providers this build ships', docsFor('id').some((d) => d.title.includes('Provider')), 'no provider entry');
+  eq('section ids are unique', new Set(DOCS.map((d) => d.id)).size, DOCS.length);
+  eq('english renders differently', docsFor('en')[0].title !== docsFor('id')[0].title, true);
+}
+
+section('translations');
+{
+  eq('two languages', LANGUAGES.length, 2);
+  check('a known key resolves', translate('id', 'settings.save') === 'Simpan', translate('id', 'settings.save'));
+  check('english resolves too', translate('en', 'settings.save') === 'Save', translate('en', 'settings.save'));
+
+  // A key missing from one language must read as the other, never as its name.
+  const unknownKey = 'this.key.does.not.exist';
+  eq('an unknown key falls back to itself', translate('id', unknownKey), unknownKey);
+  eq('an unknown key never returns empty', translate('en', unknownKey).length > 0, true);
+
+  eq('placeholders are filled', translate('id', 'projects.sessions', { n: 3 }), '3 sesi');
+  eq('placeholders work in english', translate('en', 'projects.sessions', { n: 3 }), '3 sessions');
+  check('nested words fill in', translate('en', 'key.stored', { provider: 'Groq' }).includes('Groq'), translate('en', 'key.stored', { provider: 'Groq' }));
+  check('a missing placeholder stays visible', translate('id', 'projects.sessions').includes('{n}'), translate('id', 'projects.sessions'));
+
+  // The real guard: no string may exist in one language and be missing in the other.
+  const total = i18nKeys().length;
+  check('the table is not empty', total > 200, `${total} keys`);
+  const missing = i18nKeys().filter((k) => isUntranslated('en', k));
+  eqList('every key is translated into english', missing, []);
+  const missingId = i18nKeys().filter((k) => isUntranslated('id', k));
+  eq('indonesian is the fallback and is complete', missingId.length, 0);
 }
 
 // ------------------------------------------------------------------ files
