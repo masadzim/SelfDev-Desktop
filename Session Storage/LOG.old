@@ -1,2 +1,3 @@
-2026/10/14-13:18:07.936 2060f Creating DB /home/asus/Downloads/Selfdev-Desktop/Session Storage since it was missing.
-2026/10/14-13:18:07.970 2060f Reusing MANIFEST /home/asus/Downloads/Selfdev-Desktop/Session Storage/MANIFEST-000001
+2026/10/14-13:21:37.465 20f74 Reusing MANIFEST /home/asus/Downloads/Selfdev-Desktop/Session Storage/MANIFEST-000001
+2026/10/14-13:21:37.465 20f74 Recovering log #3
+2026/10/14-13:21:37.465 20f74 Reusing old log /home/asus/Downloads/Selfdev-Desktop/Session Storage/000003.log 

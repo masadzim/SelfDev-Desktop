@@ -75,6 +75,8 @@ import {
 import { EXTENSION, FORMAT, VERSION, buildPayload, parsePayload, suggestedFilename } from '../src/shared/backupFormat';
 import { sealPayload, openPayload } from '../src/main/backup';
 import { DOCS } from '../src/shared/docs';
+import { composeAttachmentText, humanBytes, messageFor } from '../src/shared/attachments';
+import { extractFile, kindFor, mimeFor } from '../src/main/tools/extract';
 
 let passed = 0;
 let failed = 0;
@@ -105,6 +107,71 @@ function eqList(name: string, actual: unknown, expected: unknown): void {
 
 function section(title: string): void {
   console.log(`\n▸ ${title}`);
+}
+
+function docxXml(...paragraphs: string[]): string {
+  const body = paragraphs
+    .map((p) => `<w:p><w:r><w:t>${p.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</w:t></w:r></w:p>`)
+    .join('');
+  return `<?xml version="1.0"?><w:document xmlns:w="x"><w:body>${body}</w:body></w:document>`;
+}
+
+/** The smallest valid ZIP: one stored member plus the central directory. */
+function buildStoredZip(name: string, content: string): Buffer {
+  const nameBuf = Buffer.from(name, 'utf8');
+  const data = Buffer.from(content, 'utf8');
+  const crc = zlibCrc32(data);
+
+  const local = Buffer.alloc(30 + nameBuf.length);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(0, 6);
+  local.writeUInt16LE(0, 8); // stored
+  local.writeUInt16LE(0, 10);
+  local.writeUInt16LE(0, 12);
+  local.writeUInt32LE(crc, 14);
+  local.writeUInt32LE(data.length, 18);
+  local.writeUInt32LE(data.length, 22);
+  local.writeUInt16LE(nameBuf.length, 26);
+  local.writeUInt16LE(0, 28);
+  nameBuf.copy(local, 30);
+
+  const central = Buffer.alloc(46 + nameBuf.length);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt16LE(0, 10);
+  central.writeUInt32LE(crc, 16);
+  central.writeUInt32LE(data.length, 20);
+  central.writeUInt32LE(data.length, 24);
+  central.writeUInt16LE(nameBuf.length, 28);
+  central.writeUInt32LE(0, 42);
+  nameBuf.copy(central, 46);
+
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(1, 8);
+  eocd.writeUInt16LE(1, 10);
+  eocd.writeUInt32LE(central.length, 12);
+  eocd.writeUInt32LE(local.length + data.length, 16);
+
+  return Buffer.concat([local, data, central, eocd]);
+}
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+function zlibCrc32(buf: Buffer): number {
+  let c = 0xffffffff;
+  for (const byte of buf) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
 }
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
@@ -1194,6 +1261,97 @@ section('docs content');
   check('every section has a body', DOCS.every((d) => d.body.length > 0), 'empty section');
   check('every section has a title', DOCS.every((d) => d.title.trim().length > 4), 'untitled section');
   check('answers name the providers this build ships', DOCS.some((d) => d.title.includes('Provider')), 'no provider entry');
+}
+
+// ------------------------------------------------------------------ files
+
+section('attachment extraction');
+{
+  eq('a .ts file is code', kindFor('src/app.ts'), 'code');
+  eq('a .md file is markdown', kindFor('README.md'), 'markdown');
+  eq('a .csv file is csv', kindFor('data.csv'), 'csv');
+  eq('a .pdf file is pdf', kindFor('doc.pdf'), 'pdf');
+  eq('a .png file is an image', kindFor('shot.png'), 'image');
+  eq('an unknown extension is binary', kindFor('thing.qqq'), 'binary');
+  eq('pdf mime', mimeFor('a.pdf'), 'application/pdf');
+  eq('png mime', mimeFor('a.png'), 'image/png');
+  eq('fallback mime', mimeFor('a.qqq'), 'application/octet-stream');
+
+  eq('bytes under a KB', humanBytes(512), '512 B');
+  eq('bytes over a KB', humanBytes(2048), '2 KB');
+  eq('bytes over a MB', humanBytes(3 * 1024 * 1024), '3.0 MB');
+
+  // Plain text, the common case.
+  const dir = await fs.mkdtemp(join(tmpdir(), 'selfdev-attach-'));
+  const txt = join(dir, 'notes.md');
+  await fs.writeFile(txt, '# Judul\n\nIsi catatan.\n');
+  const read = await extractFile(txt);
+  eq('markdown is read as text', read.kind, 'markdown');
+  eq('markdown keeps its content', read.text.includes('Isi catatan.'), true);
+  eq('a readable file is not native', read.native, false);
+  eq('a readable file has no note', read.note, null);
+
+  // A PDF with an uncompressed content stream: the shape a document exporter
+  // produces, and the one that needs no inflate.
+  const pdfPath = join(dir, 'laporan.pdf');
+  const stream = 'BT /F1 12 Tf 72 720 Td (Kroeitang Laporan Kuartal) Tj 0 -16 Td (Pendapatan naik 12 persen.) Tj ET';
+  await fs.writeFile(
+    pdfPath,
+    `%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n` +
+      `2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n` +
+      `3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n` +
+      `4 0 obj<</Length ${stream.length}>>stream\n${stream}\nendstream endobj\n` +
+      `trailer<</Root 1 0 R>>\n%%EOF\n`
+  );
+  const pdfRead = await extractFile(pdfPath);
+  eq('pdf is recognised', pdfRead.kind, 'pdf');
+  check('pdf text layer is extracted', pdfRead.text.includes('Kroeitang Laporan Kuartal'), pdfRead.text);
+  check('the second line survives too', pdfRead.text.includes('naik 12 persen'), pdfRead.text);
+  eq('a readable pdf is not sent as bytes', pdfRead.native, false);
+
+  // A scanned pdf has no text layer; saying so is what lets the caller hand the
+  // bytes over instead of sending an empty turn.
+  const scanPath = join(dir, 'pindai.pdf');
+  await fs.writeFile(
+    scanPath,
+    '%PDF-1.4\n4 0 obj<</Length 5>>stream\nhello\nendstream endobj\n%%EOF\n'
+  );
+  const scanRead = await extractFile(scanPath);
+  eq('a pdf with no text layer carries no text', scanRead.text, '');
+  eq('a pdf with no text layer travels as bytes', scanRead.native, true);
+  check('and says why', Boolean(scanRead.note), 'no note');
+
+  // DOCX is a zip; this builds a stored (uncompressed) one by hand.
+  const docxPath = join(dir, 'notulen.docx');
+  await fs.writeFile(docxPath, buildStoredZip('word/document.xml', docxXml('Rapat Tim','Keputusan:\nBikin backup mingguan.')));
+  const docxRead = await extractFile(docxPath);
+  eq('docx is recognised', docxRead.kind, 'docx');
+  check('docx paragraphs are extracted', docxRead.text.includes('Bikin backup mingguan.'), docxRead.text);
+  check('docx paragraphs keep their order', docxRead.text.indexOf('Rapat Tim') < docxRead.text.indexOf('Bikin backup'), docxRead.text);
+
+  // Binary pretending to be text is refused rather than mangled.
+  const bin = join(dir, 'fake.md');
+  await fs.writeFile(bin, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x01]));
+  const binRead = await extractFile(bin);
+  eq('a binary masquerading as markdown is reported', binRead.text, '');
+  check('the reason is stated', Boolean(binRead.note), 'no note');
+
+  // The header is what tells the model which file is the subject.
+  const composed = composeAttachmentText(read);
+  check('the header names the file', composed.includes('notes.md'), composed);
+  check('the header states the kind', composed.includes('(markdown'), composed);
+  check('the body follows', composed.includes('Isi catatan.'), composed);
+
+  const carried = messageFor('Ringkas ini', [read], [{ name: 'a.png', mimeType: 'image/png', base64: 'AAA' }]);
+  eq('the prompt comes first', carried.text.startsWith('Ringkas ini'), true);
+  eq('the parsed file is inlined', carried.text.includes('Isi catatan.'), true);
+  eq('bytes travel separately', carried.attachments?.length, 1);
+  eq('the turn is a user turn', carried.role, 'user');
+
+  // Nothing parsed and nothing carried: the file is still named, so the model
+  // knows something was sent even though it cannot read it.
+  const empty = messageFor('', [{ path: '/x/a.bin', name: 'a.bin', bytes: 10, kind: 'binary', mimeType: 'application/octet-stream', text: '', native: false, note: 'Tidak ada pembaca teks.' }], undefined);
+  check('an unreadable file is still named', empty.text.includes('a.bin'), empty.text);
 }
 
 // ------------------------------------------------------------------ summary

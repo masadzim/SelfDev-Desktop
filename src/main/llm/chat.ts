@@ -262,9 +262,78 @@ export function streamingBody(
 
 interface OpenAiMessage {
   role: string;
-  content: string | null;
+  content: string | Array<Record<string, unknown>> | null;
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
   tool_call_id?: string;
+}
+
+/**
+ * A file riding along with a turn.
+ *
+ * Images travel as their own block type, which every format spells differently.
+ * A document that could be parsed is never sent this way — only bytes that would
+ * otherwise be lost.
+ */
+export interface InlineAttachment {
+  name: string;
+  mimeType: string;
+  base64: string;
+}
+
+/** The most one request will carry inline, to keep a turn inside a budget. */
+const MAX_INLINE_BYTES = 18 * 1024 * 1024;
+
+/**
+ * Drops attachments that would not fit, in order, rather than letting one
+ * oversized file fail the whole turn.
+ */
+export function fitAttachments(attachments: InlineAttachment[]): InlineAttachment[] {
+  const kept: InlineAttachment[] = [];
+  let used = 0;
+  for (const a of attachments) {
+    const size = Math.ceil((a.base64.length * 3) / 4);
+    if (used + size > MAX_INLINE_BYTES) break;
+    kept.push(a);
+    used += size;
+  }
+  return kept;
+}
+
+/** OpenAI blocks for a user turn: plain text, or the array form with files in it. */
+function openAiBlocks(text: string, attachments: InlineAttachment[]): string | Array<Record<string, unknown>> {
+  if (!attachments.length) return text;
+  const blocks: Array<Record<string, unknown>> = [];
+  if (text) blocks.push({ type: 'text', text });
+  for (const a of attachments) {
+    blocks.push(
+      a.mimeType.startsWith('image/')
+        ? { type: 'image_url', image_url: { url: `data:${a.mimeType};base64,${a.base64}` } }
+        : { type: 'file', file: { filename: a.name, file_data: `data:${a.mimeType};base64,${a.base64}` } }
+    );
+  }
+  return blocks;
+}
+
+function anthropicBlocks(text: string, attachments: InlineAttachment[]): AnthropicBlock[] {
+  const blocks: AnthropicBlock[] = [];
+  if (text) blocks.push({ type: 'text', text });
+  for (const a of attachments) {
+    blocks.push(
+      (a.mimeType.startsWith('image/')
+        ? { type: 'image', source: { type: 'base64', media_type: a.mimeType, data: a.base64 } }
+        : { type: 'document', source: { type: 'base64', media_type: a.mimeType, data: a.base64 } }) as AnthropicBlock
+    );
+  }
+  return blocks;
+}
+
+function geminiPartsFor(text: string, attachments: InlineAttachment[]): GeminiPart[] {
+  const parts: GeminiPart[] = [];
+  if (text) parts.push({ text });
+  for (const a of attachments) {
+    parts.push({ inlineData: { mimeType: a.mimeType, data: a.base64 } });
+  }
+  return parts;
 }
 
 function openAiMessages(system: string, history: ChatMessage[]): OpenAiMessage[] {
@@ -273,7 +342,10 @@ function openAiMessages(system: string, history: ChatMessage[]): OpenAiMessage[]
 
   for (const m of history) {
     if (m.role === 'user') {
-      if (m.text) out.push({ role: 'user', content: m.text });
+      const content = openAiBlocks(m.text ?? '', m.attachments ?? []);
+      if (m.text || (Array.isArray(content) && content.length)) {
+        out.push({ role: 'user', content: content as OpenAiMessage['content'] });
+      }
     } else if (m.tool_calls?.length) {
       out.push({
         role: 'assistant',
@@ -303,7 +375,9 @@ function openAiMessages(system: string, history: ChatMessage[]): OpenAiMessage[]
 type AnthropicBlock =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; tool_use_id: string; content: string };
+  | { type: 'tool_result'; tool_use_id: string; content: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+  | { type: 'document'; source: { type: 'base64'; media_type: string; data: string } };
 
 interface AnthropicMessage {
   role: 'user' | 'assistant';
@@ -322,7 +396,7 @@ function anthropicMessages(history: ChatMessage[]): AnthropicMessage[] {
 
   for (const m of history) {
     if (m.role === 'user') {
-      push('user', m.text ? [{ type: 'text', text: m.text }] : []);
+      push('user', anthropicBlocks(m.text ?? '', m.attachments ?? []));
     } else {
       const blocks: AnthropicBlock[] = [];
       if (m.text) blocks.push({ type: 'text', text: m.text });
@@ -342,7 +416,11 @@ function anthropicMessages(history: ChatMessage[]): AnthropicMessage[] {
   return out;
 }
 
-type GeminiPart = { text: string } | { functionCall: { name: string; args: Record<string, unknown> } } | GeminiResponsePart;
+type GeminiPart =
+  | { text: string }
+  | { functionCall: { name: string; args: Record<string, unknown> } }
+  | GeminiResponsePart
+  | { inlineData: { mimeType: string; data: string } };
 
 interface GeminiResponsePart {
   functionResponse: { name: string; response: { result: string } };
@@ -369,7 +447,7 @@ function geminiContents(history: ChatMessage[]): GeminiContent[] {
 
   for (const m of history) {
     if (m.role === 'user') {
-      push('user', m.text ? [{ text: m.text }] : []);
+      push('user', geminiPartsFor(m.text ?? '', m.attachments ?? []));
     } else {
       const parts: GeminiPart[] = [];
       if (m.text) parts.push({ text: m.text });

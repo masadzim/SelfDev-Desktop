@@ -50,6 +50,10 @@ const api = {
   renameSession: (id: string, title: string) => invoke('renameSession', id, title),
   clearSessions: () => invoke('clearSessions'),
 
+  pickAttachments: () => invoke('pickAttachments'),
+  extractPaths: (paths: string[]) => invoke('extractPaths', paths),
+  readAttachmentBytes: (params: unknown) => invoke('readAttachmentBytes', params),
+
   flush: () => invoke('flush'),
   openExternal: (url: string) => invoke('openExternal', url),
 

@@ -1789,3 +1789,69 @@ body.dark .sd-toolpop button .ic { color: var(--accent); }
 /* ---------------------------------------------------------------- backup */
 .sd-check { display: flex; align-items: center; gap: 0.45rem; font-size: 0.78rem; color: var(--text); cursor: pointer; }
 .sd-check input { width: 15px; height: 15px; accent-color: var(--agent); cursor: pointer; }
+
+/* ----------------------------------------------------------- attachments */
+.sd-attach-strip {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+}
+.sd-attach-strip[hidden] { display: none; }
+.sd-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: var(--panel-alt);
+  border-radius: 999px;
+  padding: 0.15rem 0.35rem 0.15rem 0.6rem;
+  font-size: 0.7rem;
+  max-width: 260px;
+}
+.sd-attach-name { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-attach-size { color: var(--text-muted); flex: 0 0 auto; }
+.sd-attach-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.1rem;
+  display: inline-flex;
+  border-radius: 50%;
+}
+.sd-attach-remove:hover { color: var(--bad-text); background: var(--bad-bg); }
+.sd-attach-note { color: var(--warn-text); font-size: 0.66rem; flex: 0 0 auto; }
+
+/* -------------------------------------------------------------- dispatch */
+.sd-dispatch-form {
+  display: grid;
+  gap: 0.7rem;
+  max-width: 640px;
+}
+.sd-dispatch-files { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.sd-dispatch-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.sd-dispatch-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: var(--r-sm);
+  padding: 0.4rem 0.55rem;
+  font-size: 0.76rem;
+}
+.sd-dispatch-row .sd-attach-name { flex: 1; }
+.sd-dispatch-kind {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--agent);
+  background: var(--agent-faint);
+  border-radius: var(--r-xs);
+  padding: 0.08rem 0.3rem;
+  flex: 0 0 auto;
+}
+.sd-dispatch-note { font-size: 0.68rem; color: var(--warn-text); flex: 0 0 auto; }

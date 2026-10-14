@@ -144,6 +144,11 @@ export interface ToolResultRecord {
 export interface ChatMessage {
   role: 'user' | 'assistant';
   text: string;
+  /**
+   * Files riding along with a user turn, as base64. Only set when the bytes are
+   * the only way to carry the file — anything readable travels as text instead.
+   */
+  attachments?: Array<{ name: string; mimeType: string; base64: string }>;
   tool_calls?: ToolCallRecord[];
   tool_results?: ToolResultRecord[];
   createdAt?: number;

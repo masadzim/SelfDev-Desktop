@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { promises as fs } from 'node:fs';
+import { basename } from 'node:path';
 
 import { Store } from './store';
 import { runAgent, MISSING_KEY_MESSAGE } from './agent';
@@ -7,6 +8,7 @@ import { LlmError, listModelCatalog, testConnection as probeConnection } from '.
 import { extensionFor, generateImages, imageModels, imageRequestFor } from './llm/imagegen';
 import { buildPayload, readBackup, writeBackup } from './backup';
 import { toolMetas, walkWorkspaceFiles } from './tools';
+import { extractFiles } from './tools/extract';
 import { PRESETS, labelFor, presetFor, repairModelFor } from '../shared/providers';
 import type { AppConfig, ModelEntry, Project, ProviderId, RunEvent, WireApi, WorkspaceMode } from '../shared/types';
 import { windowBg } from '../shared/theme';
@@ -311,6 +313,34 @@ export function registerIpc({ store, getWindow }: IpcDeps): () => void {
     if (res.canceled || !res.filePath) return { ok: false, cancelled: true };
     await fs.writeFile(res.filePath, Buffer.from(params.data, 'base64'));
     return { ok: true, cancelled: false, path: res.filePath };
+  });
+
+  // ------------------------------------------------------------ dispatch
+  handle('pickAttachments', async () => {
+    const win = getWindow();
+    if (!win) return [];
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Lampirkan berkas ke percakapan',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Dokumen & gambar', extensions: ['txt', 'md', 'pdf', 'docx', 'xlsx', 'csv', 'json', 'png', 'jpg', 'jpeg', 'webp'] },
+        { name: 'Semua berkas', extensions: ['*'] }
+      ]
+    });
+    if (res.canceled) return [];
+    return extractFiles(res.filePaths);
+  });
+
+  handle('extractPaths', (paths: string[]) => extractFiles(paths));
+
+  /** Reads the bytes of an attachment that has to travel natively. */
+  handle('readAttachmentBytes', async (params: { path: string; maxBytes: number }) => {
+    const stat = await fs.stat(params.path);
+    if (stat.size > params.maxBytes) {
+      return { ok: false, reason: `${basename(params.path)} terlalu besar untuk dikirim inline.` };
+    }
+    const buffer = await fs.readFile(params.path);
+    return { ok: true, base64: buffer.toString('base64'), bytes: stat.size };
   });
 
   // ----------------------------------------------------------- misc

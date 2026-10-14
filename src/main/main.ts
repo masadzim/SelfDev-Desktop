@@ -270,6 +270,9 @@ async function runSmokeTest(get: () => BrowserWindow | null): Promise<void> {
         out.modeLabel = ($('sdModeToggle') || {}).textContent || '';
         out.docsSections = $('screenDocs').querySelectorAll('.sd-doc').length;
         out.projectList = !!$('sdProjectList');
+        out.dispatchScreen = !!$('screenDispatch');
+        out.imageScreen = !!$('screenImages');
+        out.welcomeScreen = !!$('screenWelcome');
         out.hintHtml = $('sdWsHint').textContent;
         // toggle theme + mode round trip
         out.themeBefore = document.body.className;
@@ -306,10 +309,13 @@ async function runSmokeTest(get: () => BrowserWindow | null): Promise<void> {
     if ((p.marks as number) < 2) fail(`app mark did not render (${p.marks})`);
     if ((p.markGradients as number) < 2) fail(`app mark gradient missing (${p.markGradients})`);
     if (!p.themeBtn) fail('theme button empty');
-    if ((p.navButtons as number) !== 3) fail(`screen nav incomplete (${p.navButtons} buttons)`);
-    if ((p.screensRendered as number) < 2) fail(`screens did not render (${p.screensRendered})`);
+    if ((p.navButtons as number) < 3) fail(`screen nav incomplete (${p.navButtons} buttons)`);
+    if ((p.screensRendered as number) < 3) fail(`screens did not render (${p.screensRendered})`);
     if ((p.docsSections as number) < 6) fail(`docs screen empty (${p.docsSections} sections)`);
     if (!p.projectList) fail('projects screen missing');
+    if (!p.dispatchScreen) fail('dispatch screen missing');
+    if (!p.imageScreen) fail('image screen missing');
+    if (!p.welcomeScreen) fail('welcome screen missing');
     if (!String(p.modeLabel ?? '').trim()) fail('workspace mode label empty');
     if (state?.config?.model === undefined) fail('config.model missing');
     const geom = p.geom as Record<string, { w: number; h: number } | null>;

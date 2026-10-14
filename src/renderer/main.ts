@@ -13,8 +13,10 @@ import {
   repairModelFor,
   supportsDiscovery
 } from '../shared/providers';
+import type { Attachment } from '../shared/attachments';
 import { DOCS } from '../shared/docs';
 import { IMAGE_SIZES, findImageModel, imageModels, imageProviderIds } from '../shared/imagegen';
+import { MAX_INLINE_BYTES, humanBytes, messageFor } from '../shared/attachments';
 import { suggestedFilename } from '../shared/backupFormat';
 import { MODES, modeFor, modeUsesTools } from '../shared/modes';
 import type {
@@ -30,6 +32,7 @@ import type {
   Session,
   ToolMeta,
   ToolCallRecord,
+  ChatMessage,
   ToolResultRecord,
   WireApi,
   WorkspaceMode
@@ -137,6 +140,9 @@ interface Bridge {
   revealWorkspace(): Promise<boolean>;
   listWorkspaceFiles(): Promise<Array<{ path: string }>>;
   sendMessage(text: string): Promise<void>;
+  pickAttachments(): Promise<Attachment[]>;
+  extractPaths(paths: string[]): Promise<Attachment[]>;
+  readAttachmentBytes(params: { path: string; maxBytes: number }): Promise<{ ok: boolean; base64?: string; reason?: string }>;
   stopRun(): Promise<void>;
   newSession(): Promise<Session>;
   switchSession(id: string): Promise<Session | null>;
@@ -226,6 +232,9 @@ function grab(): void {
     'screenWelcome', 'sdWelcomeStart', 'sdWelcomeSkip',
     'screenProjects', 'sdProjectList', 'sdProjectNew', 'sdProjectAll',
     'screenDocs', 'sdDocsList',
+    'sdAttachBtn', 'sdAttachStrip',
+    'screenDispatch', 'sdDispatchPick', 'sdDispatchClear', 'sdDispatchSummary', 'sdDispatchList',
+    'sdDispatchPrompt', 'sdDispatchSend', 'sdDispatchStatus',
     'screenImages', 'sdImgModel', 'sdImgModelNote', 'sdImgPrompt', 'sdImgSizes', 'sdImgRun',
     'sdImgCancel', 'sdImgStatus', 'sdImgResults',
     'sdBackupPass', 'sdBackupToggle', 'sdBackupKey', 'sdBackupExport', 'sdBackupImport', 'sdBackupResult',
@@ -379,7 +388,7 @@ function renderHeader(): void {
 
 /* --------------------------------------------------------------- screens -- */
 
-type ScreenId = 'console' | 'projects' | 'images' | 'docs';
+type ScreenId = 'console' | 'projects' | 'dispatch' | 'images' | 'docs';
 
 /** One screen in the document flow at a time, so none steals the other's scroll. */
 function showScreen(id: ScreenId): void {
@@ -447,6 +456,119 @@ async function importBackup(): Promise<void> {
       out.className = 'sd-test-result bad';
     }
   }
+}
+
+/* ------------------------------------------------------------ attachments -- */
+
+/** Pending on the composer and on the Dispatch screen alike. */
+let attachments: Attachment[] = [];
+
+function renderAttachments(): void {
+  const strip = el.sdAttachStrip as HTMLElement | undefined;
+  if (!strip) return;
+  strip.hidden = attachments.length === 0;
+  strip.innerHTML = attachments
+    .map(
+      (a, i) => `<span class="sd-attach" title="${escapeHtml(a.note ?? a.path)}">
+        <span class="sd-attach-name">${escapeHtml(a.name)}</span>
+        <span class="sd-attach-size">${humanBytes(a.bytes)}</span>
+        <button class="sd-attach-remove" type="button" data-rm="${i}" aria-label="Lepas ${escapeHtml(a.name)}">${icon('close', 'ic ic-xs')}</button>
+      </span>`
+    )
+    .join('');
+  strip.querySelectorAll<HTMLButtonElement>('[data-rm]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      attachments.splice(Number(btn.dataset.rm), 1);
+      renderAttachments();
+    });
+  });
+}
+
+async function addAttachments(): Promise<void> {
+  const picked = await bridge.pickAttachments();
+  if (!picked.length) return;
+  const seen = new Set(attachments.map((a) => a.path));
+  for (const file of picked) {
+    if (!seen.has(file.path)) attachments.push(file);
+  }
+  renderAttachments();
+  renderDispatch();
+  const unreadable = picked.filter((f) => !f.text && !f.native && f.note);
+  if (unreadable.length) toast(`${unreadable.length} berkas tidak bisa dibaca`, 'bad');
+}
+
+/**
+ * Reads the bytes of anything that has to travel natively, so a scanned PDF or a
+ * screenshot reaches the model instead of a note saying it could not be read.
+ */
+async function nativeAttachmentsFor(files: Attachment[]): Promise<ChatMessage['attachments']> {
+  const out: NonNullable<ChatMessage['attachments']> = [];
+  for (const file of files) {
+    if (!file.native) continue;
+    const res = await bridge.readAttachmentBytes({ path: file.path, maxBytes: MAX_INLINE_BYTES });
+    if (res.ok && res.base64) out.push({ name: file.name, mimeType: file.mimeType, base64: res.base64 });
+  }
+  return out;
+}
+
+/** Turns pending attachments into the message that carries them. */
+async function messageWithAttachments(text: string): Promise<ChatMessage> {
+  const files = attachments;
+  const carried = await nativeAttachmentsFor(files.filter((f) => !f.text.trim()));
+  return messageFor(text, files, carried);
+}
+
+/* -------------------------------------------------------------- dispatch -- */
+
+function renderDispatch(): void {
+  const list = el.sdDispatchList as HTMLElement | undefined;
+  const summary = el.sdDispatchSummary as HTMLElement | undefined;
+  const clear = el.sdDispatchClear as HTMLButtonElement | undefined;
+  const send = el.sdDispatchSend as HTMLButtonElement | undefined;
+  if (!list) return;
+
+  summary!.textContent = `${attachments.length} berkas`;
+  if (clear) clear.hidden = attachments.length === 0;
+  if (send) {
+    send.disabled = attachments.length === 0 || !(el.sdDispatchPrompt as HTMLTextAreaElement).value.trim();
+  }
+
+  list.innerHTML = attachments
+    .map(
+      (a, i) => `<div class="sd-dispatch-row">
+        <span class="sd-dispatch-kind">${escapeHtml(a.kind)}</span>
+        <span class="sd-attach-name" title="${escapeHtml(a.path)}">${escapeHtml(a.name)}</span>
+        <span class="sd-attach-size">${humanBytes(a.bytes)}</span>
+        ${a.note ? `<span class="sd-dispatch-note" title="${escapeHtml(a.note)}">${escapeHtml(a.note.slice(0, 40))}</span>` : ''}
+        <button class="sd-attach-remove" type="button" data-rm="${i}" aria-label="Lepas">${icon('close', 'ic ic-xs')}</button>
+      </div>`
+    )
+    .join('');
+
+  list.querySelectorAll<HTMLButtonElement>('[data-rm]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      attachments.splice(Number(btn.dataset.rm), 1);
+      renderAttachments();
+      renderDispatch();
+    });
+  });
+}
+
+async function dispatchToConsole(): Promise<void> {
+  const prompt = (el.sdDispatchPrompt as HTMLTextAreaElement).value.trim();
+  if (!attachments.length || !prompt) return;
+  const status = el.sdDispatchStatus as HTMLElement | undefined;
+  if (status) {
+    status.hidden = false;
+    status.textContent = 'menyiapkan…';
+  }
+  const message = await messageWithAttachments(prompt);
+  attachments = [];
+  renderAttachments();
+  renderDispatch();
+  if (status) status.hidden = true;
+  showScreen('console');
+  await sendMessageText(message.text, message.attachments);
 }
 
 /* ---------------------------------------------------------------- images -- */
@@ -1009,7 +1131,7 @@ async function refresh(fromMain = true): Promise<void> {
   renderProjects();
 }
 
-async function send(text: string): Promise<void> {
+async function sendMessageText(text: string, carried?: ChatMessage['attachments']): Promise<void> {
   const clean = text.trim();
   if (!clean || ui.running) return;
 
@@ -1018,7 +1140,9 @@ async function send(text: string): Promise<void> {
 
   // optimistic local echo so the bubble appears instantly
   ui.raw = '';
-  session.messages.push({ role: 'user', text: clean, createdAt: Date.now() });
+  const echo: ChatMessage = { role: 'user', text: clean, createdAt: Date.now() };
+  if (carried?.length) echo.attachments = carried;
+  session.messages.push(echo);
   session.updatedAt = Date.now();
   ui.running = true;
   ui.runSessionId = session.id;
@@ -2018,11 +2142,23 @@ function wireEvents(): void {
         renderImageSizes();
         renderImageModels();
       }
+      if (target === 'dispatch') renderDispatch();
     });
   });
 
   (el.sdProjectNew as HTMLButtonElement).addEventListener('click', () => editProject(''));
   (el.sdProjectAll as HTMLButtonElement).addEventListener('click', () => void openProject(null));
+
+  // attachments & dispatch
+  (el.sdAttachBtn as HTMLButtonElement).addEventListener('click', () => void addAttachments());
+  (el.sdDispatchPick as HTMLButtonElement).addEventListener('click', () => void addAttachments());
+  (el.sdDispatchClear as HTMLButtonElement).addEventListener('click', () => {
+    attachments = [];
+    renderAttachments();
+    renderDispatch();
+  });
+  (el.sdDispatchPrompt as HTMLTextAreaElement).addEventListener('input', renderDispatch);
+  (el.sdDispatchSend as HTMLButtonElement).addEventListener('click', () => void dispatchToConsole());
 
   // images
   (el.sdImgPrompt as HTMLTextAreaElement).addEventListener('input', renderImageRunState);
@@ -2216,11 +2352,19 @@ function wireEvents(): void {
 async function sendCurrent(): Promise<void> {
   const ta = el.sdInput as HTMLTextAreaElement;
   const text = ta.value;
-  if (!text.trim() || ui.running) return;
+  if ((!text.trim() && !attachments.length) || ui.running) return;
   ta.value = '';
   (el.sdToolPop as HTMLElement).classList.remove('open');
   autosize();
-  await send(text);
+
+  if (attachments.length) {
+    const message = await messageWithAttachments(text);
+    attachments = [];
+    renderAttachments();
+    await sendMessageText(message.text, message.attachments);
+    return;
+  }
+  await sendMessageText(text);
 }
 
 async function init(): Promise<void> {

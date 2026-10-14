@@ -229,6 +229,7 @@
       <nav class="sd-nav" aria-label="Layar">
         <button class="sd-nav-btn is-on" type="button" data-screen="console" title="Console"><svg class="ic ic-sm"><use href="#i-terminal" /></svg></button>
         <button class="sd-nav-btn" type="button" data-screen="projects" title="Proyek"><svg class="ic ic-sm"><use href="#i-folder" /></svg></button>
+        <button class="sd-nav-btn" type="button" data-screen="dispatch" title="Kirim berkas"><svg class="ic ic-sm"><use href="#i-file" /></svg></button>
         <button class="sd-nav-btn" type="button" data-screen="images" title="Buat gambar"><svg class="ic ic-sm"><use href="#i-sparkle" /></svg></button>
         <button class="sd-nav-btn" type="button" data-screen="docs" title="Dokumentasi"><svg class="ic ic-sm"><use href="#i-book" /></svg></button>
       </nav>
@@ -257,7 +258,11 @@
 
         <div id="sdComposer" class="sd-composer">
           <div id="sdToolsBar" class="sd-toolsbar"></div>
+          <div id="sdAttachStrip" class="sd-attach-strip" hidden></div>
           <div class="sd-input-row">
+            <button id="sdAttachBtn" class="sd-btn-icon" type="button" title="Lampirkan berkas">
+              <svg class="ic"><use href="#i-plus" /></svg>
+            </button>
             <div id="sdToolPop" class="sd-toolpop" role="listbox"></div>
             <textarea
               id="sdInput"
@@ -289,6 +294,36 @@
         </div>
       </div>
       <div id="sdProjectList" class="sd-project-list"></div>
+    </section>
+
+    <!-- ============================================================== dispatch -->
+    <section id="screenDispatch" class="sd-screen sd-page" data-screen-body="dispatch" hidden>
+      <div class="sd-page-head">
+        <h2>Kirim berkas</h2>
+        <p>Berkas dibaca di perangkat ini lalu isinya dikirim ke model. Teks, PDF, DOCX, dan CSV diekstrak; gambar dikirim apa adanya.</p>
+      </div>
+
+      <div class="sd-dispatch-form">
+        <div class="sd-dispatch-files">
+          <button id="sdDispatchPick" class="sd-btn sd-btn-outline sd-btn-sm" type="button">
+            <svg class="ic ic-sm"><use href="#i-folder-plus" /></svg> Pilih berkas
+          </button>
+          <button id="sdDispatchClear" class="sd-btn sd-btn-outline sd-btn-sm" type="button" hidden>Bersihkan</button>
+          <span id="sdDispatchSummary" class="sd-badge">0 berkas</span>
+        </div>
+        <div id="sdDispatchList" class="sd-dispatch-list"></div>
+        <div class="sd-field">
+          <label for="sdDispatchPrompt">Instruksi</label>
+          <textarea id="sdDispatchPrompt" rows="3" spellcheck="false" placeholder="Ringkas dokumen ini dan sebutkan bagian mana yang paling penting"></textarea>
+        </div>
+        <div class="sd-btn-row">
+          <button id="sdDispatchSend" class="sd-btn sd-btn-primary sd-btn-sm" type="button" disabled>
+            <svg class="ic ic-sm"><use href="#i-send" /></svg> Proses di console
+          </button>
+          <span id="sdDispatchStatus" class="sd-badge" hidden></span>
+        </div>
+        <small class="sd-field-note">Berkas dikirim sebagai satu pesan di console, jadi jawabannya tetap tersimpan di riwayat.</small>
+      </div>
     </section>
 
     <!-- ================================================================ images -->

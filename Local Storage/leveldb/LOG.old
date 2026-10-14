@@ -1,2 +1,3 @@
-2026/10/14-13:18:04.579 205f6 Creating DB /home/asus/Downloads/Selfdev-Desktop/Local Storage/leveldb since it was missing.
-2026/10/14-13:18:04.633 205f6 Reusing MANIFEST /home/asus/Downloads/Selfdev-Desktop/Local Storage/leveldb/MANIFEST-000001
+2026/10/14-13:33:40.108 22cac Reusing MANIFEST /home/asus/Downloads/Selfdev-Desktop/Local Storage/leveldb/MANIFEST-000001
+2026/10/14-13:33:40.121 22cac Recovering log #3
+2026/10/14-13:33:40.121 22cac Reusing old log /home/asus/Downloads/Selfdev-Desktop/Local Storage/leveldb/000003.log 
